@@ -1,0 +1,1357 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProScheduler (Enhanced)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel (JSX 변환용) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- html2canvas (이미지 캡처용) -->
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    
+    <style>
+        /* 커스텀 스크롤바 */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        /* 프린트/캡처용 숨김 클래스 */
+        .print-hidden {
+            display: none;
+        }
+        /* Gantt 헤더 고정을 위한 스타일 */
+        .gantt-header-sticky {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            background-color: white;
+        }
+        .gantt-col-weekend {
+            background-color: #f8fafc; /* 매우 연한 회색 */
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect, useRef } = React;
+
+        // --- 아이콘 컴포넌트 ---
+        const Icon = ({ children, size = 24, className = "" }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
+        );
+        const CalendarIcon = (props) => <Icon {...props}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></Icon>;
+        const CheckSquare = (props) => <Icon {...props}><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></Icon>;
+        const BarChart2 = (props) => <Icon {...props}><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></Icon>;
+        const Plus = (props) => <Icon {...props}><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></Icon>;
+        const Trash2 = (props) => <Icon {...props}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></Icon>;
+        const Edit2 = (props) => <Icon {...props}><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></Icon>;
+        const XIcon = (props) => <Icon {...props}><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></Icon>;
+        const Layout = (props) => <Icon {...props}><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></Icon>;
+        const Users = (props) => <Icon {...props}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></Icon>;
+        const Activity = (props) => <Icon {...props}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></Icon>;
+        const Save = (props) => <Icon {...props}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></Icon>;
+        const Upload = (props) => <Icon {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></Icon>;
+        const FileText = (props) => <Icon {...props}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></Icon>;
+        const Search = (props) => <Icon {...props}><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></Icon>;
+
+        // --- 초기 샘플 데이터 (담당자 필드 추가) ---
+        const INITIAL_TASKS = [
+            { id: 1, category: '기획', taskName: '요구사항 분석', department: '기획팀', assignee: '김기획', start: '2024-05-01', end: '2024-05-09', progress: 100, predecessors: [] },
+            { id: 2, category: '디자인', taskName: 'UI/UX 시안 제작', department: '디자인팀', assignee: '이디자', start: '2024-05-12', end: '2024-05-25', progress: 60, predecessors: [1] },
+            { id: 3, category: '개발', taskName: '프론트엔드 구조 설계', department: '개발팀', assignee: '박개발', start: '2024-05-15', end: '2024-06-05', progress: 45, predecessors: [1] },
+            { id: 4, category: '개발', taskName: 'API 연동', department: '개발팀', assignee: '최서버', start: '2024-06-01', end: '2024-06-20', progress: 0, predecessors: [3] },
+            { id: 5, category: '테스트', taskName: '단위 테스트', department: 'QA팀', assignee: '정테스', start: '2024-06-15', end: '2024-06-30', progress: 0, predecessors: [4] },
+        ];
+
+        // --- 유틸리티 함수 ---
+        const getDaysDiff = (start, end) => {
+            const s = new Date(start);
+            const e = new Date(end);
+            return Math.ceil((e - s) / (1000 * 60 * 60 * 24));
+        };
+
+        const formatDate = (date) => {
+            const d = new Date(date);
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        const getKoreanDay = (date) => {
+            const days = ['일', '월', '화', '수', '목', '금', '토'];
+            return days[date.getDay()];
+        };
+
+        const getWeekNumber = (d) => {
+            d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+            d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
+            var yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+            var weekNo = Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
+            return weekNo;
+        };
+
+        // --- 데이터 마이그레이션/정규화 (담당자 필드 추가) ---
+        const normalizeTasks = (arr) => {
+            if (!Array.isArray(arr)) return [];
+            return arr.map((t, idx) => {
+                const start = t.start || t.actStart || t.planStart || '';
+                const end = t.end || t.actEnd || t.planEnd || '';
+                const predecessors = Array.isArray(t.predecessors) ? t.predecessors
+                    : Array.isArray(t.predecessorIds) ? t.predecessorIds
+                    : Array.isArray(t.dependencies) ? t.dependencies
+                    : [];
+                return {
+                    id: (t.id ?? Date.now() + idx),
+                    category: t.category || '',
+                    taskName: t.taskName || '',
+                    department: t.department || '',
+                    assignee: t.assignee || '', // 담당자 필드 추가
+                    start,
+                    end,
+                    progress: Number.isFinite(Number(t.progress)) ? Number(t.progress) : 0,
+                    predecessors: predecessors.map(v => Number(v)).filter(v => Number.isFinite(v)),
+                };
+            });
+        };
+
+        const normalizeVacations = (arr) => {
+            if (!Array.isArray(arr)) return [];
+            return arr.map((v, idx) => ({
+                id: (v.id ?? Date.now() + idx),
+                title: v.title || v.name || '휴가',
+                start: v.start || v.startDate || '',
+                end: v.end || v.endDate || v.start || v.startDate || '',
+            })).filter(v => v.start);
+        };
+
+        // --- Gantt Chart 컴포넌트 ---
+        function GanttChartComponent({ tasks, vacations = [], viewMode = 'Day', rangePadding = { before: 0, after: 0 }, fitEnabled = false, fitPages = 1, isExportMode = false, exportId = 'gantt-export-target' }) {
+            const { minDate, maxDate, totalDays } = useMemo(() => {
+                const getValidDate = (dateStr) => {
+                    if (!dateStr) return null;
+                    const d = new Date(dateStr);
+                    return isNaN(d.getTime()) ? null : d;
+                };
+
+                const validDates = [
+                    ...tasks.flatMap(t => [getValidDate(t.start), getValidDate(t.end || t.start)].filter(Boolean)),
+                    ...vacations.flatMap(v => [getValidDate(v.start), getValidDate(v.end || v.start)].filter(Boolean)),
+                ];
+
+                let min = null;
+                let max = null;
+                if (validDates.length === 0) {
+                    const now = new Date();
+                    min = new Date(now); min.setMonth(min.getMonth() - 1);
+                    max = new Date(now); max.setMonth(max.getMonth() + 1);
+                } else {
+                    min = new Date(Math.min(...validDates));
+                    max = new Date(Math.max(...validDates));
+                }
+
+                if (viewMode === 'Week') {
+                    min.setDate(min.getDate() - min.getDay());
+                    max.setDate(max.getDate() + (6 - max.getDay()));
+                } else if (viewMode === 'Month') {
+                    min.setDate(1);
+                    max = new Date(max.getFullYear(), max.getMonth() + 1, 0);
+                }
+
+                const before = Math.max(0, Number(rangePadding.before || 0));
+                const after = Math.max(0, Number(rangePadding.after || 0));
+
+                if (viewMode === 'Day') {
+                    min.setDate(min.getDate() - before);
+                    max.setDate(max.getDate() + after);
+                } else if (viewMode === 'Week') {
+                    min.setDate(min.getDate() - before * 7);
+                    max.setDate(max.getDate() + after * 7);
+                } else if (viewMode === 'Month') {
+                    min.setMonth(min.getMonth() - before);
+                    min.setDate(1);
+                    max = new Date(max.getFullYear(), max.getMonth() + after + 1, 0);
+                }
+
+                const msDay = 1000 * 60 * 60 * 24;
+                const diff = Math.max(0, Math.ceil((max - min) / msDay)) + 1; 
+                return { minDate: min, maxDate: max, totalDays: diff };
+            }, [tasks, vacations, viewMode, rangePadding]);
+
+            const viewportRef = useRef(null);
+            const [viewportWidth, setViewportWidth] = useState(0);
+
+            useEffect(() => {
+                if (isExportMode) return;
+                if (!fitEnabled) return;
+                const el = viewportRef.current;
+                if (!el) return;
+
+                const update = () => setViewportWidth(el.clientWidth || 0);
+                update();
+
+                if (typeof ResizeObserver === 'undefined') return;
+                const ro = new ResizeObserver(() => update());
+                ro.observe(el);
+                return () => ro.disconnect();
+            }, [isExportMode, fitEnabled, viewMode]);
+
+            const config = {
+                Day: { colWidth: 60 },
+                Week: { colWidth: 22 },
+                Month: { colWidth: 6 }
+            };
+
+            const baseColWidth = config[viewMode].colWidth;
+            const pages = Math.max(1, Number(fitPages || 1));
+
+            let colWidth = baseColWidth;
+            if (!isExportMode && fitEnabled && viewportWidth > 0) {
+                colWidth = viewportWidth / (Math.max(1, totalDays) * pages);
+                colWidth = Math.min(baseColWidth, Math.max(1, colWidth));
+            }
+
+            const chartWidth = totalDays * colWidth;
+
+            // --- 2단 헤더 생성 로직 ---
+            const renderDoubleHeader = () => {
+                const topHeaders = [];
+                const bottomHeaders = [];
+
+                if (viewMode === 'Day') {
+                    let tempDate = new Date(minDate);
+                    for (let i = 0; i < totalDays;) {
+                        const currentYear = tempDate.getFullYear();
+                        const currentMonth = tempDate.getMonth();
+                        let daysInMonth = 0;
+                        let checkDate = new Date(tempDate);
+                        while (i + daysInMonth < totalDays && checkDate.getMonth() === currentMonth) {
+                            daysInMonth++;
+                            checkDate.setDate(checkDate.getDate() + 1);
+                        }
+                        topHeaders.push(
+                            <div key={`top-${i}`} className="flex items-center justify-center border-r border-slate-300 bg-slate-100 text-xs font-bold text-slate-700 h-8" style={{ width: `${daysInMonth * colWidth}px` }}>
+                                {currentYear}년 {currentMonth + 1}월
+                            </div>
+                        );
+                        i += daysInMonth;
+                        tempDate = new Date(checkDate);
+                    }
+                    let bottomDate = new Date(minDate);
+                    for (let i = 0; i < totalDays; i++) {
+                        const dayName = getKoreanDay(bottomDate);
+                        const isWeekend = dayName === '토' || dayName === '일';
+                        bottomHeaders.push(
+                            <div key={`bot-${i}`} className={`flex items-center justify-center border-r border-slate-200 text-[10px] h-8 font-medium ${isWeekend ? 'bg-slate-50 text-red-500' : 'bg-white text-slate-600'} ${bottomDate.getDate() === 1 ? 'border-l-2 border-l-slate-400' : ''}`} style={{ width: `${colWidth}px` }}>
+                                {bottomDate.getDate()} ({dayName})
+                            </div>
+                        );
+                        bottomDate.setDate(bottomDate.getDate() + 1);
+                    }
+                } else if (viewMode === 'Week') {
+                    let tempDate = new Date(minDate);
+                    for (let i = 0; i < totalDays;) {
+                        const currentYear = tempDate.getFullYear();
+                        const currentMonth = tempDate.getMonth();
+                        let daysInMonth = 0;
+                        let checkDate = new Date(tempDate);
+                        while (i + daysInMonth < totalDays && checkDate.getMonth() === currentMonth) {
+                            daysInMonth++;
+                            checkDate.setDate(checkDate.getDate() + 1);
+                        }
+                        topHeaders.push(
+                            <div key={`top-w-${i}`} className="flex items-center justify-center border-r border-slate-300 bg-slate-100 text-xs font-bold text-slate-700 h-8" style={{ width: `${daysInMonth * colWidth}px` }}>
+                                {currentYear}년 {currentMonth + 1}월
+                            </div>
+                        );
+                        i += daysInMonth;
+                        tempDate = new Date(checkDate);
+                    }
+                    let bottomDate = new Date(minDate);
+                    for (let i = 0; i < totalDays; i++) {
+                        const isMonday = bottomDate.getDay() === 1;
+                        const showLabel = isMonday || i === 0;
+                        const isWeekend = bottomDate.getDay() === 0 || bottomDate.getDay() === 6;
+                        bottomHeaders.push(
+                            <div key={`bot-w-${i}`} className={`flex items-center justify-center border-r border-slate-200 text-[10px] h-8 ${isWeekend ? 'bg-slate-50' : 'bg-white'} ${bottomDate.getDate() === 1 ? 'border-l-2 border-l-slate-400' : ''}`} style={{ width: `${colWidth}px` }}>
+                                {showLabel && <span className="absolute whitespace-nowrap bg-white/80 px-1 rounded border border-slate-200 z-10 shadow-sm text-slate-700">{bottomDate.getMonth() + 1}/{bottomDate.getDate()} ({getWeekNumber(bottomDate)}주)</span>}
+                            </div>
+                        );
+                        bottomDate.setDate(bottomDate.getDate() + 1);
+                    }
+                } else if (viewMode === 'Month') {
+                    let tempDate = new Date(minDate);
+                    for (let i = 0; i < totalDays;) {
+                        const currentYear = tempDate.getFullYear();
+                        let daysInYear = 0;
+                        let checkDate = new Date(tempDate);
+                        while (i + daysInYear < totalDays && checkDate.getFullYear() === currentYear) {
+                            daysInYear++;
+                            checkDate.setDate(checkDate.getDate() + 1);
+                        }
+                        topHeaders.push(
+                            <div key={`top-m-${i}`} className="flex items-center justify-center border-r border-slate-300 bg-slate-200 text-sm font-bold text-slate-800 h-8" style={{ width: `${daysInYear * colWidth}px` }}>
+                                {currentYear}년
+                            </div>
+                        );
+                        i += daysInYear;
+                        tempDate = new Date(checkDate);
+                    }
+                    let bottomDate = new Date(minDate);
+                    for (let i = 0; i < totalDays;) {
+                        const currentMonth = bottomDate.getMonth();
+                        let daysInMonth = 0;
+                        let checkDate = new Date(bottomDate);
+                        while (i + daysInMonth < totalDays && checkDate.getMonth() === currentMonth) {
+                            daysInMonth++;
+                            checkDate.setDate(checkDate.getDate() + 1);
+                        }
+                        bottomHeaders.push(
+                            <div key={`bot-m-${i}`} className="flex items-center justify-center border-r border-slate-300 bg-white text-xs font-bold text-slate-600 h-8" style={{ width: `${daysInMonth * colWidth}px` }}>
+                                {currentMonth + 1}월
+                            </div>
+                        );
+                        i += daysInMonth;
+                        bottomDate = new Date(checkDate);
+                    }
+                }
+
+                return (
+                    <div className="flex flex-col border-b border-slate-300">
+                        <div className="flex h-8">{topHeaders}</div>
+                        <div className="flex h-8">{bottomHeaders}</div>
+                    </div>
+                );
+            };
+
+            const renderGridBackground = () => {
+                const grids = [];
+                let d = new Date(minDate);
+                if (viewMode === 'Month') {
+                    for (let i = 0; i < totalDays; i++) {
+                        const isMonthStart = d.getDate() === 1;
+                        grids.push(<div key={i} className={`h-full ${isMonthStart ? 'border-l-2 border-l-slate-400' : ''}`} style={{ width: `${colWidth}px`, boxSizing: 'border-box' }}></div>);
+                        d.setDate(d.getDate() + 1);
+                    }
+                } else {
+                    for (let i = 0; i < totalDays; i++) {
+                        const dayName = getKoreanDay(d);
+                        const isWeekend = dayName === '토' || dayName === '일';
+                        const isMonthStart = d.getDate() === 1;
+                        grids.push(<div key={i} className={`border-r h-full ${isWeekend ? 'bg-slate-50' : 'bg-white'} ${isMonthStart ? 'border-l-2 border-l-slate-400' : 'border-slate-200'} border-r-slate-200`} style={{ width: `${colWidth}px` }}></div>);
+                        d.setDate(d.getDate() + 1);
+                    }
+                }
+                return grids;
+            };
+
+            const renderVacationOverlays = () => {
+                const overlays = [];
+                vacations.forEach((v) => {
+                    const s = v.start;
+                    const e = v.end || v.start;
+                    if (!s) return;
+                    const offset = getDaysDiff(minDate, s);
+                    const duration = getDaysDiff(s, e) + 1;
+                    if (isNaN(offset) || isNaN(duration) || duration <= 0) return;
+                    const left = offset * colWidth;
+                    const width = duration * colWidth;
+                    overlays.push(
+                        <div key={v.id} className="absolute top-0 bottom-0 bg-rose-100/50 border border-rose-200 pointer-events-none" style={{ left: `${left}px`, width: `${width}px` }} title={`${v.title}: ${s} ~ ${e}`}>
+                            <div className="absolute top-1 left-1 text-[10px] font-bold text-rose-700 bg-white/70 border border-rose-200 rounded px-1">{v.title}</div>
+                        </div>
+                    );
+                });
+                return overlays;
+            };
+
+            // [추가] 오늘 날짜(Today) 선 렌더링 함수
+            const renderTodayLine = () => {
+                const today = new Date();
+                if (today < minDate || today > maxDate) return null;
+
+                const offset = getDaysDiff(minDate, today);
+                const left = offset * colWidth;
+
+                return (
+                    <div 
+                        className="absolute top-0 bottom-0 border-l-2 border-red-500 z-20 pointer-events-none dashed"
+                        style={{ left: `${left}px`, borderStyle: 'dashed' }}
+                    >
+                        <div className="bg-red-500 text-white text-[10px] px-1 rounded absolute -top-1 -left-6 w-12 text-center shadow-sm">
+                            Today
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderDependencyArrows = () => {
+                const rowHeight = isExportMode ? 56 : 48;
+                const byId = {};
+                tasks.forEach((t, idx) => {
+                    const s = t.start;
+                    const e = t.end || t.start;
+                    if (!s) return;
+                    const offset = getDaysDiff(minDate, s);
+                    const duration = getDaysDiff(s, e) + 1;
+                    if (isNaN(offset) || isNaN(duration) || duration <= 0) return;
+                    const left = offset * colWidth;
+                    const width = duration * colWidth;
+                    byId[t.id] = { xStart: left, xEnd: left + width, y: idx * rowHeight + rowHeight / 2, row: idx };
+                });
+
+                const paths = [];
+                const avoidPad = 6;
+                const isXClearForRows = (x, rowMin, rowMax, excludeIds) => {
+                    const minR = Math.min(rowMin, rowMax);
+                    const maxR = Math.max(rowMin, rowMax);
+                    for (const [idStr, info] of Object.entries(byId)) {
+                        const id = Number(idStr);
+                        if (!Number.isFinite(id)) continue;
+                        if (excludeIds && excludeIds.has(id)) continue;
+                        if (!info) continue;
+                        const r = info.row;
+                        if (r < minR || r > maxR) continue;
+                        if (x >= (info.xStart - avoidPad) && x <= (info.xEnd + avoidPad)) return false;
+                    }
+                    return true;
+                };
+
+                const findSafeX = (preferred, xMin, xMax, rowMin, rowMax, excludeIds) => {
+                    if (!Number.isFinite(preferred)) return preferred;
+                    if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || xMax <= xMin) return preferred;
+                    let x0 = Math.min(xMax, Math.max(xMin, preferred));
+                    if (isXClearForRows(x0, rowMin, rowMax, excludeIds)) return x0;
+                    const step = 6;
+                    const maxTry = Math.max(12, Math.floor((xMax - xMin) / step) * step);
+                    for (let d = step; d <= maxTry; d += step) {
+                        const xl = x0 - d;
+                        const xr = x0 + d;
+                        if (xl >= xMin && isXClearForRows(xl, rowMin, rowMax, excludeIds)) return xl;
+                        if (xr <= xMax && isXClearForRows(xr, rowMin, rowMax, excludeIds)) return xr;
+                    }
+                    return x0;
+                };
+
+                tasks.forEach((t) => {
+                    const to = byId[t.id];
+                    if (!to || !Array.isArray(t.predecessors) || t.predecessors.length === 0) return;
+                    t.predecessors.forEach((pid) => {
+                        const from = byId[pid];
+                        if (!from) return;
+                        const x1 = from.xEnd;
+                        const y1 = from.y;
+                        const x2 = to.xStart;
+                        const y2 = to.y;
+                        const bump = 14;
+                        const approachGap = 10;
+                        const xPre = Math.max(0, x2 - approachGap);
+                        const xMin = x1 + bump;
+                        const xMax = xPre;
+                        const rowMin = (from.row ?? 0);
+                        const rowMax = (to.row ?? 0);
+                        const exclude = new Set([pid, t.id]);
+                        const xV = (xMax > xMin) ? findSafeX(xMin, xMin, xMax, rowMin, rowMax, exclude) : xMin;
+                        const d = `M ${x1} ${y1} L ${xV} ${y1} L ${xV} ${y2} L ${xPre} ${y2} L ${x2} ${y2}`;
+                        paths.push(<path key={`${pid}->${t.id}`} d={d} fill="none" stroke="rgba(71,85,105,0.65)" strokeWidth="1.5" markerEnd="url(#arrowHead)" />);
+                    });
+                });
+
+                if (paths.length === 0) return null;
+                return (
+                    <svg className="absolute inset-0 z-20 pointer-events-none" width={chartWidth} height={tasks.length * rowHeight}>
+                        <defs><marker id="arrowHead" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="rgba(71,85,105,0.65)" /></marker></defs>
+                        {paths}
+                    </svg>
+                );
+            };
+
+            const containerClass = isExportMode
+                ? "bg-white border border-slate-300 flex flex-col"
+                : "bg-white rounded-xl shadow border border-slate-300 flex flex-col h-[600px]";
+
+            return (
+                <div id={isExportMode ? exportId : "gantt-main"} className={containerClass}>
+                    <div className="flex flex-1 overflow-hidden">
+                        {/* 왼쪽: 업무 리스트 (담당자 표시 추가) */} 
+                        <div className="w-64 border-r border-slate-300 bg-white flex flex-col z-10 shadow-md">
+                            <div className="h-16 border-b border-slate-300 bg-slate-100 flex items-center px-4 font-bold text-sm text-slate-700">
+                                업무 / 담당자
+                            </div>
+                            <div className={`${isExportMode ? 'overflow-visible h-auto' : 'overflow-y-hidden flex-1'}`}>
+                                {tasks.map((task, idx) => (
+                                    <div key={task.id} className={`${isExportMode ? 'h-14 items-start py-1' : 'h-12 items-center'} border-b border-slate-200 px-4 flex text-sm ${isExportMode ? '' : 'truncate'} ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+                                        <div className="flex flex-col w-full overflow-hidden">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-slate-800 font-medium truncate">{task.taskName}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center text-[10px] text-slate-500 mt-0.5">
+                                                <span>{task.category} | {task.department}</span>
+                                                {/* 담당자 표시 */}
+                                                {task.assignee && (
+                                                    <span className="font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 ml-2 truncate max-w-[60px]">
+                                                        {task.assignee}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 오른쪽: 차트 영역 */}
+                        <div ref={viewportRef} className={`flex-1 relative ${isExportMode ? 'overflow-visible' : (fitEnabled ? 'overflow-x-hidden overflow-y-auto' : 'overflow-auto')}`}> 
+                            <div style={{ width: `${chartWidth}px`, minWidth: '100%' }}>
+                                <div className="gantt-header-sticky">
+                                    {renderDoubleHeader()}
+                                </div>
+
+                                <div className="relative">
+                                    <div className="absolute inset-0 flex pointer-events-none z-0">
+                                        {renderGridBackground()}
+                                    </div>
+
+                                    <div className="absolute inset-0 z-5 pointer-events-none">
+                                        {renderVacationOverlays()}
+                                    </div>
+                                    
+                                    {/* Today 라인 표시 */}
+                                    {renderTodayLine()}
+
+                                    {renderDependencyArrows()}
+
+                                    {/* 업무 바 */}
+                                    <div className="z-10 relative">
+                                        {tasks.map(task => {
+                                            const s = task.start;
+                                            const e = task.end || task.start;
+                                            if (!s) return (
+                                                <div key={task.id} className={`${isExportMode ? 'h-14' : 'h-12'} border-b border-slate-200 relative flex items-center`}>
+                                                    <span className="text-xs text-slate-400 ml-2">일정 미지정</span>
+                                                </div>
+                                            );
+
+                                            const offsetDays = getDaysDiff(minDate, s);
+                                            const durationDays = getDaysDiff(s, e) + 1;
+
+                                            if (isNaN(offsetDays) || isNaN(durationDays) || durationDays <= 0) return (
+                                                <div key={task.id} className={`${isExportMode ? 'h-14' : 'h-12'} border-b border-slate-200 relative flex items-center`}>
+                                                    <span className="text-xs text-slate-400 ml-2">일정 오류</span>
+                                                </div>
+                                            );
+
+                                            const left = offsetDays * colWidth;
+                                            const width = durationDays * colWidth;
+
+                                            // 지연 여부 및 색상 로직
+                                            const todayDate = new Date();
+                                            const endDate = new Date(e);
+                                            todayDate.setHours(0,0,0,0);
+                                            endDate.setHours(0,0,0,0);
+
+                                            const isDelayed = (todayDate > endDate) && (task.progress < 100);
+                                            
+                                            // 색상 결정: 지연(빨강) vs 완료(초록) vs 진행(파랑)
+                                            let barColor = "bg-blue-500";
+                                            let borderColor = "border-blue-400";
+                                            let bgColor = "bg-blue-100";
+
+                                            if (isDelayed) {
+                                                barColor = "bg-red-500";
+                                                borderColor = "border-red-400";
+                                                bgColor = "bg-red-100";
+                                            } else if (task.progress === 100) {
+                                                barColor = "bg-emerald-500";
+                                                borderColor = "border-emerald-400";
+                                                bgColor = "bg-emerald-100";
+                                            }
+
+                                            return (
+                                                <div key={task.id} className={`${isExportMode ? 'h-14' : 'h-12'} border-b border-slate-200 relative group flex items-center`}>
+                                                    <div
+                                                        className={`absolute h-6 rounded border flex items-center overflow-hidden shadow-sm ${bgColor} ${borderColor}`}
+                                                        style={{ left: `${left}px`, width: `${width}px` }}
+                                                        title={`${task.taskName} (${task.progress}%) - ${s} ~ ${e}`}
+                                                    >
+                                                        <div className={`h-full opacity-90 transition-all duration-300 ${barColor}`} style={{ width: `${task.progress}%` }} />
+                                                        <span className={`absolute left-2 text-[10px] font-bold whitespace-nowrap drop-shadow-sm ${isDelayed ? 'text-red-900' : (task.progress===100 ? 'text-emerald-900' : 'text-blue-900')}`}>
+                                                            {task.progress}% {isDelayed && '(지연)'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 범례 업데이트 */}
+                    <div className="p-2 bg-slate-50 text-xs text-slate-600 flex flex-wrap gap-6 border-t border-slate-300 font-medium">
+                        <div className="flex items-center gap-2">
+                            <div className="w-4 h-4 bg-blue-100 border border-blue-400 rounded relative overflow-hidden">
+                                <div className="absolute left-0 top-0 bottom-0 w-1/2 bg-blue-500"></div>
+                            </div>
+                            진행중
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="w-4 h-4 bg-emerald-100 border border-emerald-400 rounded relative overflow-hidden">
+                                <div className="absolute left-0 top-0 bottom-0 w-1/2 bg-emerald-500"></div>
+                            </div>
+                            완료됨(100%)
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="w-4 h-4 bg-red-100 border border-red-400 rounded relative overflow-hidden">
+                                <div className="absolute left-0 top-0 bottom-0 w-1/2 bg-red-500"></div>
+                            </div>
+                            <span className="text-red-600 font-bold">지연된 업무</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="w-0.5 h-4 bg-red-500 border-l border-dashed"></div>
+                            오늘(Today)
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="w-4 h-4 bg-rose-100/80 border border-rose-200 rounded"></div>
+                            휴가
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- 메인 컴포넌트 ---
+        function ProjectScheduler() {
+            const [activeTab, setActiveTab] = useState('tasks');
+
+            const [projectName, setProjectName] = useState(() => localStorage.getItem('proSchedulerName') || '');
+            const [tasks, setTasks] = useState(() => {
+                const saved = localStorage.getItem('proSchedulerTasks');
+                if (!saved) return INITIAL_TASKS;
+                try {
+                    return normalizeTasks(JSON.parse(saved));
+                } catch (e) {
+                    return INITIAL_TASKS;
+                }
+            });
+            const [vacations, setVacations] = useState(() => {
+                const saved = localStorage.getItem('proSchedulerVacations');
+                if (!saved) return [];
+                try {
+                    return normalizeVacations(JSON.parse(saved));
+                } catch (e) {
+                    return [];
+                }
+            });
+            const [rangePadding, setRangePadding] = useState(() => {
+                const saved = localStorage.getItem('proSchedulerRangePadding');
+                if (!saved) return { Day: { before: 15, after: 15 }, Week: { before: 2, after: 2 }, Month: { before: 1, after: 1 } };
+                try {
+                    const parsed = JSON.parse(saved);
+                    return parsed || { Day: { before: 15, after: 15 }, Week: { before: 2, after: 2 }, Month: { before: 1, after: 1 } };
+                } catch (e) {
+                    return { Day: { before: 15, after: 15 }, Week: { before: 2, after: 2 }, Month: { before: 1, after: 1 } };
+                }
+            });
+
+            const [fitSettings, setFitSettings] = useState(() => {
+                const saved = localStorage.getItem('proSchedulerFitSettings');
+                const fallback = { Day: { enabled: false, pages: 1 }, Week: { enabled: false, pages: 1 }, Month: { enabled: false, pages: 1 } };
+                if (!saved) return fallback;
+                try {
+                    const parsed = JSON.parse(saved);
+                    return { ...fallback, ...(parsed || {}) };
+                } catch (e) {
+                    return fallback;
+                }
+            });
+
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+            const [editingTask, setEditingTask] = useState(null);
+            const fileInputRef = useRef(null);
+            const [ganttViewMode, setGanttViewMode] = useState('Day');
+
+            // [추가] 필터링을 위한 state
+            const [filterText, setFilterText] = useState('');
+
+            const [vacForm, setVacForm] = useState(() => {
+                const today = formatDate(new Date());
+                return { title: '', start: today, end: today };
+            });
+
+            // 필터링 로직
+            const filteredTasks = useMemo(() => {
+                if (!filterText.trim()) return tasks;
+                const lower = filterText.toLowerCase();
+                return tasks.filter(t => 
+                    (t.taskName && t.taskName.toLowerCase().includes(lower)) ||
+                    (t.department && t.department.toLowerCase().includes(lower)) ||
+                    (t.assignee && t.assignee.toLowerCase().includes(lower))
+                );
+            }, [tasks, filterText]);
+
+            useEffect(() => {
+                localStorage.setItem('proSchedulerTasks', JSON.stringify(tasks));
+                localStorage.setItem('proSchedulerVacations', JSON.stringify(vacations));
+                localStorage.setItem('proSchedulerName', projectName);
+                localStorage.setItem('proSchedulerRangePadding', JSON.stringify(rangePadding));
+                localStorage.setItem('proSchedulerFitSettings', JSON.stringify(fitSettings));
+            }, [tasks, vacations, projectName, rangePadding, fitSettings]);
+
+            // formData에 assignee 추가
+            const [formData, setFormData] = useState({
+                category: '', taskName: '', department: '', assignee: '',
+                start: '', end: '', predecessors: [], progress: 0
+            });
+
+            const [reportGanttMode, setReportGanttMode] = useState('Week');
+            const [isGenerating, setIsGenerating] = useState(false);
+
+            const [isImageExportModalOpen, setIsImageExportModalOpen] = useState(false);
+            const [exportFormat, setExportFormat] = useState('png'); 
+            const [exportScope, setExportScope] = useState('full');  
+            const [exportScale, setExportScale] = useState(3);       
+            const [exportJpegQuality, setExportJpegQuality] = useState(0.92);
+            const [exportFileName, setExportFileName] = useState('');
+
+            const exportGanttImage = async () => {
+                // ... 기존 이미지 Export 로직 (동일)
+                try {
+                    const targetId = (exportScope === 'visible') ? 'gantt-main' : 'gantt-image-export-target';
+                    const el = document.getElementById(targetId);
+                    if (!el) throw new Error("Export target not found");
+                    const scale = Math.max(1, Math.min(4, Number(exportScale || 3)));
+                    const canvas = await html2canvas(el, { scale, useCORS: true, logging: false, backgroundColor: '#ffffff', width: el.scrollWidth, height: el.scrollHeight, windowWidth: el.scrollWidth, windowHeight: el.scrollHeight });
+                    const ext = (exportFormat === 'jpg') ? 'jpg' : 'png';
+                    const mime = (exportFormat === 'jpg') ? 'image/jpeg' : 'image/png';
+                    const quality = (exportFormat === 'jpg') ? Math.max(0.5, Math.min(1, Number(exportJpegQuality || 0.92))) : 1;
+                    const dataUrl = canvas.toDataURL(mime, quality);
+                    const baseNameRaw = exportFileName || `${projectName || 'Project'}_Gantt_${ganttViewMode}_${formatDate(new Date())}`;
+                    const baseName = String(baseNameRaw).replace(/[\\/:*?"<>|]/g, '_');
+                    const link = document.createElement('a');
+                    link.href = dataUrl;
+                    link.download = `${baseName}.${ext}`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    setIsImageExportModalOpen(false);
+                } catch (error) {
+                    console.error(error);
+                    alert('이미지 내보내기 중 오류가 발생했습니다.');
+                }
+            };
+
+            const generateWordReport = async () => {
+                // ... 기존 Word 리포트 생성 로직 (동일)
+                setIsGenerating(true);
+                try {
+                    const ganttElement = document.getElementById('gantt-export-target');
+                    if (!ganttElement) throw new Error("Chart not found");
+                    const canvas = await html2canvas(ganttElement, { scale: 2, useCORS: true, logging: false, windowWidth: ganttElement.scrollWidth + 100 });
+                    const imgData = canvas.toDataURL('image/png');
+                    const totalProgress = Math.round(tasks.reduce((acc, curr) => acc + curr.progress, 0) / (tasks.length || 1));
+                    const completed = tasks.filter(t => t.progress === 100).length;
+                    const reportHtml = `
+                        <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+                        <head><meta charset="utf-8"><title>${projectName} 보고서</title>
+                        <style>body{font-family:'Malgun Gothic',sans-serif}h1{font-size:24pt;color:#1e3a8a;text-align:center;margin-bottom:20px}h2{font-size:16pt;color:#334155;border-bottom:2px solid #334155;padding-bottom:5px;margin-top:30px}table{border-collapse:collapse;width:100%;margin-top:10px;font-size:10pt}th,td{border:1px solid #64748b;padding:8px;text-align:center}th{background-color:#f1f5f9;font-weight:bold}.summary-box{border:1px solid #cbd5e1;padding:15px;background-color:#f8fafc;margin-bottom:20px}.stat{font-size:11pt;margin-bottom:5px}.img-container{text-align:center;margin-top:20px}img{max-width:100%;height:auto;border:1px solid #cbd5e1}</style></head>
+                        <body><h1>${projectName || '무제 프로젝트'} 진척도 보고서</h1>
+                            <h2>1. 프로젝트 요약</h2><div class="summary-box"><p class="stat"><strong>작성일:</strong> ${formatDate(new Date())}</p><p class="stat"><strong>전체 진척도:</strong> ${totalProgress}%</p><p class="stat"><strong>총 업무 수:</strong> ${tasks.length}건 (완료: ${completed}건)</p></div>
+                            <h2>2. 상세 업무 현황</h2><table><thead><tr><th>대분류</th><th>상세내용</th><th>부서</th><th>담당자</th><th>기간</th><th>진척도</th></tr></thead><tbody>
+                                    ${tasks.map(t => `<tr><td>${t.category}</td><td>${t.taskName}</td><td>${t.department}</td><td>${t.assignee || '-'}</td><td>${t.start || '-'} ~ ${t.end || t.start || '-'}</td><td>${t.progress}%</td></tr>`).join('')}
+                                </tbody></table>
+                            <h2>3. 일정 흐름 (Gantt Chart - ${reportGanttMode} View)</h2><div class="img-container"><img src="${imgData}" /></div><br/><br/></body></html>`;
+                    const blob = new Blob(['\ufeff', reportHtml], { type: 'application/msword' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `${projectName || 'Project'}_Report_${formatDate(new Date())}.doc`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    setIsReportModalOpen(false);
+                } catch (error) { console.error(error); alert("보고서 생성 중 오류가 발생했습니다."); } finally { setIsGenerating(false); }
+            };
+
+            const saveProjectFile = () => {
+                const data = { name: projectName, tasks: tasks, vacations: vacations, rangePadding: rangePadding, fitSettings: fitSettings };
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data));
+                const node = document.createElement('a');
+                node.href = dataStr;
+                node.download = `${projectName || 'ProScheduler'}_Backup_${formatDate(new Date())}.json`;
+                document.body.appendChild(node);
+                node.click();
+                node.remove();
+            };
+
+            const handleFileImport = (e) => {
+                const fileReader = new FileReader();
+                fileReader.readAsText(e.target.files[0], "UTF-8");
+                fileReader.onload = (e) => {
+                    try {
+                        const parsed = JSON.parse(e.target.result);
+                        if (Array.isArray(parsed)) {
+                            if (window.confirm("현재 데이터를 덮어쓰시겠습니까?")) setTasks(normalizeTasks(parsed));
+                        } else if (parsed.tasks) {
+                            if (window.confirm(`'${parsed.name || '프로젝트'}' 프로젝트를 불러오시겠습니까?`)) {
+                                setTasks(normalizeTasks(parsed.tasks));
+                                setProjectName(parsed.name || '');
+                                setVacations(normalizeVacations(parsed.vacations || []));
+                                setRangePadding(parsed.rangePadding || { Day: { before: 15, after: 15 }, Week: { before: 2, after: 2 }, Month: { before: 1, after: 1 } });
+                                setFitSettings(parsed.fitSettings || { Day: { enabled: false, pages: 1 }, Week: { enabled: false, pages: 1 }, Month: { enabled: false, pages: 1 } });
+                            }
+                        } else { alert("파일 형식 오류"); }
+                    } catch (error) { alert("파일 오류"); }
+                };
+                e.target.value = null;
+            };
+
+            const openModal = (task = null) => {
+                if (task) {
+                    setEditingTask(task);
+                    setFormData({
+                        category: task.category || '',
+                        taskName: task.taskName || '',
+                        department: task.department || '',
+                        assignee: task.assignee || '', // 불러오기
+                        start: task.start || '',
+                        end: task.end || task.start || '',
+                        progress: Number(task.progress || 0),
+                        predecessors: Array.isArray(task.predecessors) ? task.predecessors : []
+                    });
+                } else {
+                    const today = formatDate(new Date());
+                    setEditingTask(null);
+                    setFormData({ category: '', taskName: '', department: '', assignee: '', start: today, end: today, predecessors: [], progress: 0 });
+                }
+                setIsModalOpen(true);
+            };
+
+            const handleSave = () => {
+                if (!formData.category || !formData.taskName) return alert('필수 입력 누락');
+                const payload = { ...formData, end: formData.end || formData.start || '' };
+                if (editingTask) { setTasks(tasks.map(t => t.id === editingTask.id ? { ...payload, id: t.id } : t)); } 
+                else { setTasks([...tasks, { ...payload, id: Date.now() }]); }
+                setIsModalOpen(false);
+            };
+
+            const handleDelete = (id) => {
+                if (!window.confirm('삭제하시겠습니까?')) return;
+                setTasks(prev => prev.filter(t => t.id !== id).map(t => ({ ...t, predecessors: (t.predecessors || []).filter(pid => pid !== id) })));
+            };
+
+            const moveTask = (id, direction) => {
+                setTasks(prev => {
+                    const idx = prev.findIndex(t => t.id === id);
+                    if (idx < 0) return prev;
+                    const nextIdx = Math.min(prev.length - 1, Math.max(0, idx + direction));
+                    if (nextIdx === idx) return prev;
+                    const arr = [...prev];
+                    const [item] = arr.splice(idx, 1);
+                    arr.splice(nextIdx, 0, item);
+                    return arr;
+                });
+            };
+
+            const moveTaskToIndex = (id, toIndex) => {
+                setTasks(prev => {
+                    const idx = prev.findIndex(t => t.id === id);
+                    if (idx < 0) return prev;
+                    const nextIdx = Math.min(prev.length - 1, Math.max(0, Number(toIndex) - 1));
+                    if (nextIdx === idx) return prev;
+                    const arr = [...prev];
+                    const [item] = arr.splice(idx, 1);
+                    arr.splice(nextIdx, 0, item);
+                    return arr;
+                });
+            };
+
+            const sortTasksByStart = (direction = 'asc') => {
+                setTasks(prev => {
+                    const parse = (d) => { if (!d) return null; const t = Date.parse(d); return Number.isFinite(t) ? t : null; };
+                    const arr = [...prev].sort((a, b) => {
+                        const ta = parse(a.start);
+                        const tb = parse(b.start);
+                        if (ta === null && tb === null) return 0;
+                        if (ta === null) return 1;
+                        if (tb === null) return -1;
+                        return direction === 'desc' ? (tb - ta) : (ta - tb);
+                    });
+                    return arr;
+                });
+            };
+
+            const addVacation = () => {
+                if (!vacForm.start) return alert('휴가 시작일 누락');
+                const payload = { id: Date.now(), title: (vacForm.title || '휴가').trim(), start: vacForm.start, end: vacForm.end || vacForm.start };
+                setVacations(prev => [...prev, payload]);
+                const today = formatDate(new Date());
+                setVacForm({ title: '', start: today, end: today });
+            };
+
+            const deleteVacation = (id) => { if (window.confirm('휴가 일정을 삭제하시겠습니까?')) { setVacations(prev => prev.filter(v => v.id !== id)); } };
+
+            const updatePadding = (key, value) => { const v = Math.max(0, Number(value || 0)); setRangePadding(prev => ({ ...prev, [ganttViewMode]: { ...(prev[ganttViewMode] || {}), [key]: v } })); };
+            const updateFit = (key, value) => {
+                setFitSettings(prev => {
+                    const current = prev[ganttViewMode] || { enabled: false, pages: 1 };
+                    if (key === 'pages') { const pages = Math.max(1, Math.min(20, Number(value || 1))); return { ...prev, [ganttViewMode]: { ...current, pages } }; }
+                    if (key === 'enabled') { return { ...prev, [ganttViewMode]: { ...current, enabled: !!value } }; }
+                    return prev;
+                });
+            };
+
+            const rangeUnit = ganttViewMode === 'Day' ? '일' : ganttViewMode === 'Week' ? '주' : '월';
+
+            const renderContent = () => {
+                switch (activeTab) {
+                    case 'tasks':
+                        return (
+                            <TaskManagement
+                                tasks={tasks}
+                                openModal={openModal}
+                                handleDelete={handleDelete}
+                                moveTask={moveTask}
+                                moveTaskToIndex={moveTaskToIndex}
+                                sortTasksByStart={sortTasksByStart}
+                                projectName={projectName}
+                                setProjectName={setProjectName}
+                                openReportModal={() => setIsReportModalOpen(true)}
+                            />
+                        );
+                    case 'schedule':
+                        return (
+                            <div className="space-y-4">
+                                <div className="flex flex-col lg:flex-row gap-4">
+                                    <div className="flex-1">
+                                        <div className="mb-2 flex justify-between items-end">
+                                            <h2 className="text-xl font-bold text-slate-800">{projectName || '프로젝트'} 일정</h2>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                {/* 검색 필터 및 알림 바 */}
+                                <div className="bg-white p-3 rounded-xl shadow border border-slate-200 flex flex-col md:flex-row gap-4 items-center justify-between">
+                                    <div className="flex items-center gap-2 w-full md:w-auto relative">
+                                        <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400"><Search size={16} /></div>
+                                        <input 
+                                            type="text" 
+                                            placeholder="담당자, 부서, 업무명 검색..." 
+                                            className="border border-slate-300 rounded-full pl-9 pr-4 py-2 text-sm w-full md:w-64 focus:outline-blue-500 transition-all focus:w-80"
+                                            value={filterText}
+                                            onChange={(e) => setFilterText(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="text-xs text-slate-500 flex items-center gap-4">
+                                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span>지연 업무</span>
+                                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500"></span>완료</span>
+                                        <span className="flex items-center gap-1 border-l-2 border-dashed border-red-500 pl-1 h-3">Today</span>
+                                    </div>
+                                </div>
+
+                                {/* 휴가 입력 */}
+                                <div className="bg-white rounded-xl shadow border border-slate-200 p-4">
+                                    <div className="flex items-center justify-between gap-3 mb-3">
+                                        <h3 className="font-semibold text-slate-700">휴가 일정</h3>
+                                        <button onClick={() => {const e=document.getElementById('vac-content'); e.classList.toggle('hidden');}} className="text-xs text-slate-500 underline md:hidden">열기/접기</button>
+                                    </div>
+                                    <div id="vac-content" className="block">
+                                        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-500 mb-1">명칭</label>
+                                                <input type="text" className="w-full border p-2 rounded" placeholder="예: 연차(홍길동)" value={vacForm.title} onChange={e => setVacForm({ ...vacForm, title: e.target.value })} />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-500 mb-1">시작일</label>
+                                                <input type="date" className="w-full border p-2 rounded" value={vacForm.start} onChange={e => setVacForm({ ...vacForm, start: e.target.value })} />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-500 mb-1">종료일</label>
+                                                <input type="date" className="w-full border p-2 rounded" value={vacForm.end} onChange={e => setVacForm({ ...vacForm, end: e.target.value })} />
+                                            </div>
+                                            <button onClick={addVacation} className="bg-rose-600 text-white px-4 py-2 rounded font-bold hover:bg-rose-700">추가</button>
+                                        </div>
+                                        {vacations.length > 0 && (
+                                            <div className="mt-4 overflow-x-auto max-h-32 custom-scrollbar">
+                                                <div className="flex flex-wrap gap-2">
+                                                    {vacations.map(v => (
+                                                        <span key={v.id} className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 text-xs rounded border border-slate-200 text-slate-700">
+                                                            {v.title} ({v.start})
+                                                            <button onClick={() => deleteVacation(v.id)} className="text-red-400 hover:text-red-600 ml-1"><XIcon size={12} /></button>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* 일정 보기 */}
+                                <div className="bg-white rounded-xl shadow border border-slate-300 flex flex-col h-[600px]">
+                                    <div className="p-4 border-b border-slate-300 flex flex-col lg:flex-row gap-3 justify-between items-start lg:items-center bg-slate-50">
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex bg-white rounded-lg border border-slate-300 p-1">
+                                                {['Day', 'Week', 'Month'].map(mode => (
+                                                    <button key={mode} onClick={() => setGanttViewMode(mode)} className={`px-4 py-1 text-xs font-bold rounded-md transition-colors ${ganttViewMode === mode ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>{mode}</button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-end gap-2 overflow-x-auto pb-1 w-full lg:w-auto">
+                                            <div className="whitespace-nowrap">
+                                                <label className="block text-[10px] font-bold text-slate-500 mb-1">표시(앞) / {rangeUnit}</label>
+                                                <input type="number" min="0" className="w-16 border p-2 rounded text-sm" value={(rangePadding[ganttViewMode] || {}).before || 0} onChange={e => updatePadding('before', e.target.value)} />
+                                            </div>
+                                            <div className="whitespace-nowrap">
+                                                <label className="block text-[10px] font-bold text-slate-500 mb-1">표시(뒤) / {rangeUnit}</label>
+                                                <input type="number" min="0" className="w-16 border p-2 rounded text-sm" value={(rangePadding[ganttViewMode] || {}).after || 0} onChange={e => updatePadding('after', e.target.value)} />
+                                            </div>
+                                            <div className="whitespace-nowrap flex flex-col justify-end h-full pb-2 px-2">
+                                                <label className="flex items-center gap-2 text-[12px] font-bold text-slate-500 cursor-pointer">
+                                                    <input type="checkbox" checked={(fitSettings[ganttViewMode] || {}).enabled || false} onChange={e => updateFit('enabled', e.target.checked)} />
+                                                    한화면
+                                                </label>
+                                            </div>
+                                            <div className="whitespace-nowrap">
+                                                <label className="block text-[12px] font-bold text-slate-500 mb-1">페이지</label>
+                                                <input type="number" min="1" max="20" className="w-16 border p-2 rounded text-sm" disabled={!((fitSettings[ganttViewMode] || {}).enabled || false)} value={(fitSettings[ganttViewMode] || {}).pages || 1} onChange={e => updateFit('pages', e.target.value)} />
+                                            </div>
+                                            <div className="pl-2">
+                                                <button onClick={() => { setExportFileName(''); setExportScope('full'); setExportFormat('png'); setExportScale(3); setExportJpegQuality(0.92); setIsImageExportModalOpen(true); }} className="bg-emerald-600 text-white px-3 py-2 rounded font-bold hover:bg-emerald-700 text-xs whitespace-nowrap" title="이미지 저장">
+                                                    IMG 저장
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* filteredTasks 전달 */}
+                                    <GanttChartComponent
+                                        tasks={filteredTasks}
+                                        vacations={vacations}
+                                        viewMode={ganttViewMode}
+                                        rangePadding={rangePadding[ganttViewMode] || { before: 0, after: 0 }}
+                                        fitEnabled={(fitSettings[ganttViewMode] || {}).enabled || false}
+                                        fitPages={(fitSettings[ganttViewMode] || {}).pages || 1}
+                                    />
+
+                                    {isImageExportModalOpen && exportScope === 'full' && (
+                                        <div style={{ position: 'fixed', left: '-100000px', top: '0px', pointerEvents: 'none' }}>
+                                            <GanttChartComponent
+                                                tasks={filteredTasks} // Export 시에도 필터 적용된 것 출력 (선택사항, 여기선 필터된 것 출력)
+                                                vacations={vacations}
+                                                viewMode={ganttViewMode}
+                                                rangePadding={rangePadding[ganttViewMode] || { before: 0, after: 0 }}
+                                                isExportMode={true}
+                                                exportId="gantt-image-export-target"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    case 'dashboard':
+                        return <Dashboard tasks={tasks} projectName={projectName} />;
+                    default: return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+                    <header className="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-30">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                            <div className="flex flex-col md:flex-row justify-between items-center h-auto md:h-16 py-2 md:py-0 gap-2">
+                                <div className="flex items-center gap-2">
+                                    <Layout className="w-8 h-8 text-blue-600" />
+                                    <div><h1 className="text-xl font-bold text-slate-800">ProScheduler <span className="text-xs text-blue-500 font-normal">Enhanced</span></h1></div>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <nav className="flex space-x-1">
+                                        <TabButton active={activeTab === 'tasks'} onClick={() => setActiveTab('tasks')} icon={<CheckSquare size={18} />} label="업무 관리" />
+                                        <TabButton active={activeTab === 'schedule'} onClick={() => setActiveTab('schedule')} icon={<CalendarIcon size={18} />} label="일정" />
+                                        <TabButton active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<BarChart2 size={18} />} label="대시보드" />
+                                    </nav>
+                                    <div className="flex items-center gap-1 pl-4 border-l border-slate-200">
+                                        <button onClick={saveProjectFile} className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-md" title="저장"><Save size={18} /></button>
+                                        <button onClick={() => fileInputRef.current.click()} className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-md" title="불러오기"><Upload size={18} /></button>
+                                        <input type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept=".json" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                        {renderContent()}
+                    </main>
+
+                    {/* 업무 추가/수정 모달 (담당자 필드 추가) */}
+                    {isModalOpen && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden">
+                                <div className="bg-slate-100 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+                                    <h3 className="text-lg font-semibold text-slate-800">{editingTask ? '업무 수정' : '새 업무 추가'}</h3>
+                                    <button onClick={() => setIsModalOpen(false)}><XIcon size={20} /></button>
+                                </div>
+                                <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="col-span-1">
+                                        <label className="block text-sm font-medium mb-1">대분류</label>
+                                        <input type="text" className="w-full border p-2 rounded" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} />
+                                    </div>
+                                    <div className="col-span-1">
+                                        <label className="block text-sm font-medium mb-1">상세내용</label>
+                                        <input type="text" className="w-full border p-2 rounded" value={formData.taskName} onChange={e => setFormData({...formData, taskName: e.target.value})} />
+                                    </div>
+                                    <div className="col-span-1">
+                                        <label className="block text-sm font-medium mb-1">부서</label>
+                                        <input type="text" className="w-full border p-2 rounded" value={formData.department} onChange={e => setFormData({...formData, department: e.target.value})} />
+                                    </div>
+                                    {/* 담당자 입력 필드 추가 */}
+                                    <div className="col-span-1">
+                                        <label className="block text-sm font-medium mb-1 text-blue-700">담당자</label>
+                                        <input type="text" className="w-full border p-2 rounded border-blue-200 bg-blue-50" placeholder="이름 입력" value={formData.assignee} onChange={e => setFormData({...formData, assignee: e.target.value})} />
+                                    </div>
+
+                                    <div className="col-span-1">
+                                        <label className="block text-sm font-medium mb-1">시작일</label>
+                                        <input type="date" className="w-full border p-2 rounded" value={formData.start} onChange={e => setFormData({...formData, start: e.target.value})} />
+                                    </div>
+                                    <div className="col-span-1">
+                                        <label className="block text-sm font-medium mb-1">완료일</label>
+                                        <input type="date" className="w-full border p-2 rounded" value={formData.end} onChange={e => setFormData({...formData, end: e.target.value})} />
+                                    </div>
+
+                                    <div className="col-span-2">
+                                        <div className="flex items-center justify-between mb-1">
+                                            <label className="block text-sm font-medium">선행업무 (Ctrl/Shift 다중선택)</label>
+                                            <button type="button" onClick={() => setFormData({ ...formData, predecessors: [] })} className="text-xs font-bold text-slate-600 hover:text-blue-600">초기화</button>
+                                        </div>
+                                        <select multiple className="w-full border p-2 rounded h-20" value={(formData.predecessors || []).map(String)} onChange={e => { const selected = Array.from(e.target.selectedOptions).map(o => Number(o.value)); setFormData({ ...formData, predecessors: selected }); }}>
+                                            {tasks.filter(t => !editingTask || t.id !== editingTask.id).map(t => <option key={t.id} value={t.id}>{t.taskName} ({t.assignee || '미정'})</option>)}
+                                        </select>
+                                    </div>
+
+                                    <div className="col-span-2">
+                                        <label className="block text-sm font-medium mb-1">진척도 ({formData.progress}%)</label>
+                                        <input type="range" min="0" max="100" step="5" className="w-full" value={formData.progress} onChange={e => setFormData({...formData, progress: Number(e.target.value)})} />
+                                    </div>
+                                </div>
+                                <div className="bg-slate-50 px-6 py-4 border-t flex justify-end gap-3">
+                                    <button onClick={() => setIsModalOpen(false)} className="px-4 py-2 border rounded bg-white">취소</button>
+                                    <button onClick={handleSave} className="px-4 py-2 bg-blue-600 text-white rounded">저장</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 보고서 출력 모달 */}
+                    {isReportModalOpen && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl overflow-hidden max-h-[90vh] flex flex-col">
+                                <div className="bg-blue-600 text-white px-6 py-4 flex justify-between items-center">
+                                    <h3 className="text-lg font-bold">Word 보고서 생성</h3>
+                                    <button onClick={() => setIsReportModalOpen(false)} className="text-white hover:text-blue-200"><XIcon size={20} /></button>
+                                </div>
+                                <div className="p-6 overflow-y-auto flex-1 bg-slate-50">
+                                    <div className="mb-6 bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">Gantt 차트 보기 모드 선택</label>
+                                        <div className="flex gap-2">
+                                            {['Day', 'Week', 'Month'].map(mode => (
+                                                <button key={mode} onClick={() => setReportGanttMode(mode)} className={`px-4 py-2 rounded-lg border text-sm font-bold transition-colors ${reportGanttMode === mode ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{mode} View</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="border border-slate-300 rounded-lg p-4 bg-white shadow-sm">
+                                        <h4 className="text-sm font-bold mb-3 text-slate-700">보고서 미리보기 (차트)</h4>
+                                        <div className="bg-white rounded border border-slate-300 overflow-x-auto p-2">
+                                            <GanttChartComponent tasks={filteredTasks} vacations={vacations} viewMode={reportGanttMode} rangePadding={rangePadding[reportGanttMode] || { before: 0, after: 0 }} isExportMode={true} />
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-white px-6 py-4 border-t flex justify-end gap-3">
+                                    <button onClick={() => setIsReportModalOpen(false)} className="px-4 py-2 border rounded bg-white hover:bg-slate-50">닫기</button>
+                                    <button onClick={generateWordReport} disabled={isGenerating} className="px-6 py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 disabled:bg-blue-300 flex items-center gap-2 shadow-sm">
+                                        {isGenerating ? '생성 중...' : <><FileText size={18}/> Word 보고서 다운로드</>}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Gantt 이미지 내보내기 모달 (UI 유지) */}
+                    {isImageExportModalOpen && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden">
+                                <div className="bg-emerald-600 text-white px-6 py-4 flex justify-between items-center">
+                                    <h3 className="text-lg font-bold">Gantt 이미지 다운로드</h3>
+                                    <button onClick={() => setIsImageExportModalOpen(false)} className="text-white hover:text-emerald-200"><XIcon size={20} /></button>
+                                </div>
+                                <div className="p-6 space-y-4 bg-slate-50">
+                                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div><label className="block text-xs font-bold text-slate-500 mb-1">포맷</label><select className="w-full border p-2 rounded" value={exportFormat} onChange={e => setExportFormat(e.target.value)}><option value="png">PNG (권장)</option><option value="jpg">JPG</option></select></div>
+                                            <div><label className="block text-xs font-bold text-slate-500 mb-1">캡처 범위</label><select className="w-full border p-2 rounded" value={exportScope} onChange={e => setExportScope(e.target.value)}><option value="full">전체 차트(스크롤 포함)</option><option value="visible">현재 화면(보이는 영역)</option></select></div>
+                                            <div><label className="block text-xs font-bold text-slate-500 mb-1">해상도(scale)</label><select className="w-full border p-2 rounded" value={String(exportScale)} onChange={e => setExportScale(Number(e.target.value))}><option value="1">x1</option><option value="2">x2</option><option value="3">x3 (고화질)</option><option value="4">x4 (초고화질)</option></select></div>
+                                            <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">파일명(선택)</label><input type="text" className="w-full border p-2 rounded" placeholder="미입력 시 자동 생성" value={exportFileName} onChange={e => setExportFileName(e.target.value)} /></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-white px-6 py-4 border-t flex justify-end gap-3">
+                                    <button onClick={() => setIsImageExportModalOpen(false)} className="px-4 py-2 border rounded bg-white hover:bg-slate-50">닫기</button>
+                                    <button onClick={exportGanttImage} className="px-6 py-2 bg-emerald-600 text-white rounded font-bold hover:bg-emerald-700 shadow-sm">이미지 다운로드</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function TabButton({ active, onClick, icon, label }) {
+            return (
+                <button onClick={onClick} className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${active ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                    {icon} <span className="hidden sm:inline">{label}</span>
+                </button>
+            );
+        }
+
+        function TaskManagement({ tasks, openModal, handleDelete, moveTask, moveTaskToIndex, sortTasksByStart, projectName, setProjectName, openReportModal }) {
+            const taskNameById = useMemo(() => { const m = {}; tasks.forEach(t => { m[t.id] = t.taskName; }); return m; }, [tasks]);
+            const getPredecessorLabel = (task) => { if (!Array.isArray(task.predecessors) || task.predecessors.length === 0) return '-'; return task.predecessors.map(id => taskNameById[id]).filter(Boolean).join(', ') || '-'; };
+
+            return (
+                <div className="space-y-4">
+                    <div className="bg-white p-4 rounded-xl shadow border border-slate-200 flex flex-col md:flex-row items-start md:items-center gap-4">
+                        <div className="flex-1 w-full">
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Project Name</label>
+                            <input type="text" value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="프로젝트 명칭을 입력하세요" className="w-full text-lg font-bold text-slate-800 border-b-2 border-slate-200 focus:border-blue-500 focus:outline-none py-1 transition-colors bg-transparent placeholder-slate-300" />
+                        </div>
+                        <button onClick={openReportModal} className="w-full md:w-auto flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm whitespace-nowrap">
+                            <FileText size={18} /> 보고서 출력
+                        </button>
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow border border-slate-200 overflow-hidden">
+                        <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                            <h2 className="text-lg font-semibold text-slate-800">업무 목록</h2>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => openModal()} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md text-sm hover:bg-blue-700 transition-colors shadow-sm"><Plus size={16} /> 업무 추가</button>
+                            </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-slate-100 text-slate-600 font-medium">
+                                    <tr>
+                                        <th className="px-4 py-3 text-center whitespace-nowrap w-16">순서</th>
+                                        <th className="px-4 py-3 whitespace-nowrap">대분류</th>
+                                        <th className="px-4 py-3 whitespace-nowrap">상세내용</th>
+                                        <th className="px-4 py-3 whitespace-nowrap">부서</th>
+                                        <th className="px-4 py-3 whitespace-nowrap">담당자</th>
+                                        <th className="px-4 py-3 whitespace-nowrap">기간</th>
+                                        <th className="px-4 py-3 text-center whitespace-nowrap">진척도</th>
+                                        <th className="px-4 py-3 text-right whitespace-nowrap">관리</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {tasks.length === 0 ? (
+                                        <tr><td colSpan="8" className="px-4 py-8 text-center text-slate-400">등록된 업무가 없습니다.</td></tr>
+                                    ) : tasks.map((task, index) => (
+                                        <tr key={task.id} className="hover:bg-slate-50">
+                                            <td className="px-4 py-3 text-center whitespace-nowrap">
+                                                <div className="flex items-center justify-center gap-1">
+                                                    <button onClick={() => moveTask(task.id, -1)} disabled={index === 0} className={`px-2 py-1 rounded border text-xs ${index === 0 ? 'opacity-30' : 'hover:bg-slate-100'}`}>▲</button>
+                                                    <button onClick={() => moveTask(task.id, 1)} disabled={index === tasks.length - 1} className={`px-2 py-1 rounded border text-xs ${index === tasks.length - 1 ? 'opacity-30' : 'hover:bg-slate-100'}`}>▼</button>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-3 font-medium text-slate-800">{task.category}</td>
+                                            <td className="px-4 py-3">{task.taskName}</td>
+                                            <td className="px-4 py-3"><span className="bg-slate-200 text-slate-700 px-2 py-0.5 rounded text-xs">{task.department}</span></td>
+                                            <td className="px-4 py-3"><span className="text-blue-600 font-bold">{task.assignee || '-'}</span></td>
+                                            <td className="px-4 py-3 text-slate-500 text-xs">{task.start || '-'} ~ {task.end || task.start || '-'}</td>
+                                            <td className="px-4 py-3 text-center">
+                                                <div className="flex items-center gap-2 justify-center">
+                                                    <div className="w-16 h-2 bg-slate-200 rounded-full overflow-hidden">
+                                                        <div className={`${task.progress === 100 ? 'bg-emerald-500' : 'bg-blue-500'} h-full`} style={{ width: `${task.progress}%` }} />
+                                                    </div>
+                                                    <span className="text-xs">{task.progress}%</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-3 text-right">
+                                                <div className="flex justify-end gap-2">
+                                                    <button onClick={() => openModal(task)} className="text-blue-500 hover:text-blue-700"><Edit2 size={16} /></button>
+                                                    <button onClick={() => handleDelete(task.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function Dashboard({ tasks, projectName }) {
+            const totalProgress = useMemo(() => tasks.length === 0 ? 0 : Math.round(tasks.reduce((acc, curr) => acc + curr.progress, 0) / tasks.length), [tasks]);
+            const deptStats = useMemo(() => {
+                const stats = {};
+                tasks.forEach(t => { if (!stats[t.department]) stats[t.department] = { sum: 0, count: 0 }; stats[t.department].sum += t.progress; stats[t.department].count += 1; });
+                return Object.entries(stats).map(([dept, data]) => ({ name: dept, avg: Math.round(data.sum / data.count) }));
+            }, [tasks]);
+            const completed = useMemo(() => tasks.filter(t => t.progress === 100).length, [tasks]);
+
+            return (
+                <div className="space-y-6">
+                    <div className="mb-2"><h2 className="text-2xl font-bold text-slate-800">{projectName || '프로젝트'} 현황판</h2></div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-white p-6 rounded-xl shadow border border-slate-100 flex items-center gap-4">
+                            <div className="p-3 bg-blue-100 text-blue-600 rounded-full"><Activity size={24} /></div>
+                            <div><p className="text-sm text-slate-500 font-medium">전체 진척도</p><p className="text-3xl font-bold text-slate-800">{totalProgress}%</p></div>
+                        </div>
+                        <div className="bg-white p-6 rounded-xl shadow border border-slate-100 flex items-center gap-4">
+                            <div className="p-3 bg-emerald-100 text-emerald-600 rounded-full"><CheckSquare size={24} /></div>
+                            <div><p className="text-sm text-slate-500 font-medium">완료된 업무</p><p className="text-3xl font-bold text-slate-800">{completed} <span className="text-sm text-slate-400 font-normal">/ {tasks.length}</span></p></div>
+                        </div>
+                        <div className="bg-white p-6 rounded-xl shadow border border-slate-100 flex items-center gap-4">
+                            <div className="p-3 bg-purple-100 text-purple-600 rounded-full"><Users size={24} /></div>
+                            <div><p className="text-sm text-slate-500 font-medium">참여 부서</p><p className="text-3xl font-bold text-slate-800">{deptStats.length}개 팀</p></div>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="bg-white p-6 rounded-xl shadow border border-slate-100">
+                            <h3 className="text-lg font-semibold text-slate-800 mb-6">부서별 평균 진척도</h3>
+                            <div className="space-y-4">{deptStats.map(dept => (<div key={dept.name}><div className="flex justify-between text-sm mb-1"><span className="font-medium text-slate-700">{dept.name}</span><span className="text-slate-500">{dept.avg}%</span></div><div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden"><div className="bg-indigo-500 h-full rounded-full" style={{ width: `${dept.avg}%` }} /></div></div>))}</div>
+                        </div>
+                        <div className="bg-white p-6 rounded-xl shadow border border-slate-100">
+                            <h3 className="text-lg font-semibold text-slate-800 mb-6">업무별 현황</h3>
+                            <div className="flex flex-col gap-3 h-64 overflow-y-auto pr-2 custom-scrollbar">{tasks.map(task => (<div key={task.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-100"><div className="flex flex-col overflow-hidden"><span className="font-medium text-slate-800 text-sm truncate">{task.taskName}</span><span className="text-xs text-slate-400">{task.category} | {task.assignee || '미정'}</span></div><div className={`text-sm font-bold ${task.progress===100?'text-emerald-600':'text-blue-600'}`}>{task.progress}%</div></div>))}</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<ProjectScheduler />);
+    </script>
+</body>
+</html>
