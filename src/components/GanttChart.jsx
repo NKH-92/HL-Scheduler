@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getDaysDiff, getKoreanDay, getWeekNumber, toDate, toUtcMidnightMs } from '../utils/dates';
+import { formatDate, getDaysDiff, getKoreanDay, getWeekNumber, toDate, toUtcMidnightMs } from '../utils/dates';
 
-function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { before: 0, after: 0 }, fitEnabled = false, fitPages = 1, isExportMode = false, exportId = 'gantt-export-target' }) {
+function GanttChart({
+  tasks,
+  vacations = [],
+  viewMode = 'Day',
+  rangePadding = { before: 0, after: 0 },
+  fitEnabled = false,
+  fitPages = 1,
+  isExportMode = false,
+  exportId = 'gantt-export-target',
+  onTaskDateChange,
+}) {
   const { minDate, maxDate, totalDays } = useMemo(() => {
     const getValidDate = (value) => {
       if (!value) return null;
@@ -54,43 +64,280 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
   }, [tasks, vacations, viewMode, rangePadding]);
 
   const viewportRef = useRef(null);
+  const leftPaneRef = useRef(null);
   const leftRowsRef = useRef(null);
+  const todayOverlayRef = useRef(null);
   const scrollRafRef = useRef(0);
-  const [viewportWidth, setViewportWidth] = useState(0);
+  const [viewportRect, setViewportRect] = useState({ width: 0, height: 0 });
+  const [rowWindow, setRowWindow] = useState(() => ({
+    start: 0,
+    end: tasks.length > 80 ? Math.min(tasks.length, 50) : tasks.length,
+  }));
+  const [colWindow, setColWindow] = useState(() => ({
+    start: 0,
+    end: totalDays > 120 ? Math.min(totalDays, 200) : totalDays,
+  }));
+  const dragInfoRef = useRef(null);
+  const dragCleanupRef = useRef(null);
+  const [dragPreview, setDragPreview] = useState(null);
+
+  const HEADER_HEIGHT_PX = 68;
+  const ROW_HEIGHT_PX = 56;
+
+  const isInteractive = !isExportMode && typeof onTaskDateChange === 'function';
+
+  useEffect(() => {
+    return () => {
+      if (dragCleanupRef.current) dragCleanupRef.current();
+    };
+  }, []);
+
+  const shiftDate = (date, deltaDays) => {
+    const next = new Date(date);
+    next.setDate(next.getDate() + deltaDays);
+    next.setHours(0, 0, 0, 0);
+    return next;
+  };
+
+  const startDrag = (event, task, mode) => {
+    if (!isInteractive) return;
+    if (event.button != null && event.button !== 0) return;
+    if (!task?.start) return;
+
+    const parsedStart = toDate(task.start);
+    const parsedEnd = toDate(task.end || task.start) || parsedStart;
+    if (!parsedStart || !parsedEnd) return;
+
+    if (dragCleanupRef.current) dragCleanupRef.current();
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    let start = parsedStart;
+    let end = parsedEnd;
+    if (end < start) [start, end] = [end, start];
+
+    const originStart = new Date(start);
+    originStart.setHours(0, 0, 0, 0);
+    const originEnd = new Date(end);
+    originEnd.setHours(0, 0, 0, 0);
+
+    const originStartYmd = formatDate(originStart);
+    const originEndYmd = formatDate(originEnd);
+
+    dragInfoRef.current = {
+      taskId: task.id,
+      mode,
+      startX: event.clientX,
+      colWidth: Math.max(1, Number(colWidth) || 1),
+      originStart,
+      originEnd,
+      originStartYmd,
+      originEndYmd,
+      latestStartYmd: originStartYmd,
+      latestEndYmd: originEndYmd,
+    };
+
+    setDragPreview({ taskId: task.id, start: originStartYmd, end: originEndYmd, mode });
+
+    const prevUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = 'none';
+
+    let finished = false;
+
+    const handleMove = (moveEvent) => {
+      const info = dragInfoRef.current;
+      if (!info) return;
+
+      const dx = moveEvent.clientX - info.startX;
+      const deltaDays = Math.round(dx / info.colWidth);
+
+      let nextStart = info.originStart;
+      let nextEnd = info.originEnd;
+
+      if (info.mode === 'move') {
+        nextStart = shiftDate(info.originStart, deltaDays);
+        nextEnd = shiftDate(info.originEnd, deltaDays);
+      } else if (info.mode === 'resizeStart') {
+        nextStart = shiftDate(info.originStart, deltaDays);
+        nextEnd = info.originEnd;
+        if (nextStart > nextEnd) nextStart = new Date(nextEnd);
+      } else if (info.mode === 'resizeEnd') {
+        nextStart = info.originStart;
+        nextEnd = shiftDate(info.originEnd, deltaDays);
+        if (nextEnd < nextStart) nextEnd = new Date(nextStart);
+      }
+
+      const nextStartYmd = formatDate(nextStart);
+      const nextEndYmd = formatDate(nextEnd);
+
+      if (nextStartYmd === info.latestStartYmd && nextEndYmd === info.latestEndYmd) return;
+
+      info.latestStartYmd = nextStartYmd;
+      info.latestEndYmd = nextEndYmd;
+
+      setDragPreview((prev) => {
+        if (
+          prev &&
+          prev.taskId === info.taskId &&
+          prev.mode === info.mode &&
+          prev.start === nextStartYmd &&
+          prev.end === nextEndYmd
+        ) {
+          return prev;
+        }
+        return { taskId: info.taskId, mode: info.mode, start: nextStartYmd, end: nextEndYmd };
+      });
+    };
+
+    const finishDrag = () => {
+      if (finished) return;
+      finished = true;
+
+      const info = dragInfoRef.current;
+      if (info && (info.latestStartYmd !== info.originStartYmd || info.latestEndYmd !== info.originEndYmd)) {
+        onTaskDateChange(info.taskId, info.latestStartYmd, info.latestEndYmd);
+      }
+
+      if (dragCleanupRef.current) dragCleanupRef.current();
+      dragCleanupRef.current = null;
+      dragInfoRef.current = null;
+      setDragPreview(null);
+    };
+
+    const cleanup = () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', finishDrag);
+      window.removeEventListener('pointercancel', finishDrag);
+      document.body.style.userSelect = prevUserSelect;
+    };
+
+    dragCleanupRef.current = cleanup;
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', finishDrag);
+    window.addEventListener('pointercancel', finishDrag);
+  };
 
   const syncLeftScroll = () => {
     if (isExportMode) return;
     const viewport = viewportRef.current;
+    if (!viewport) return;
     const leftRows = leftRowsRef.current;
-    if (!viewport || !leftRows) return;
+    const todayOverlay = todayOverlayRef.current;
     const y = viewport.scrollTop || 0;
+    const x = viewport.scrollLeft || 0;
     if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
     scrollRafRef.current = requestAnimationFrame(() => {
-      leftRows.style.transform = `translateY(-${y}px)`;
+      if (leftRows) leftRows.style.transform = `translateY(-${y}px)`;
+      if (todayOverlay) todayOverlay.style.transform = `translateX(-${x}px)`;
+      updateVirtualWindows(y, x, viewport.clientHeight || 0, viewport.clientWidth || 0);
     });
+  };
+
+  const updateVirtualWindows = (scrollTop, scrollLeft, clientHeight, clientWidth) => {
+    if (isExportMode) return;
+
+    const rowCount = tasks.length;
+    const enableRowVirtualization = rowCount > 80 && clientHeight > 0;
+
+    if (enableRowVirtualization) {
+      const overscanRows = 8;
+      const start = Math.max(0, Math.floor((scrollTop - HEADER_HEIGHT_PX) / ROW_HEIGHT_PX) - overscanRows);
+      const end = Math.min(
+        rowCount,
+        Math.ceil((scrollTop + clientHeight - HEADER_HEIGHT_PX) / ROW_HEIGHT_PX) + overscanRows,
+      );
+      setRowWindow((prev) => (prev.start === start && prev.end === end ? prev : { start, end }));
+    } else {
+      setRowWindow((prev) => (prev.start === 0 && prev.end === rowCount ? prev : { start: 0, end: rowCount }));
+    }
+
+    const enableColVirtualization =
+      !fitEnabled && totalDays > 120 && clientWidth > 0 && Number.isFinite(colWidth) && colWidth > 0;
+
+    if (enableColVirtualization) {
+      const overscanCols = Math.ceil(800 / colWidth);
+      const start = Math.max(0, Math.floor(scrollLeft / colWidth) - overscanCols);
+      const end = Math.min(totalDays, Math.ceil((scrollLeft + clientWidth) / colWidth) + overscanCols);
+      setColWindow((prev) => (prev.start === start && prev.end === end ? prev : { start, end }));
+    } else {
+      setColWindow((prev) => (prev.start === 0 && prev.end === totalDays ? prev : { start: 0, end: totalDays }));
+    }
   };
 
   useEffect(() => {
     if (isExportMode) return;
-    if (!fitEnabled) return;
     const el = viewportRef.current;
     if (!el) return;
 
-    const update = () => setViewportWidth(el.clientWidth || 0);
+    const update = () => {
+      const width = el.clientWidth || 0;
+      const height = el.clientHeight || 0;
+      setViewportRect((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+    };
     update();
 
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => update());
     ro.observe(el);
     return () => ro.disconnect();
-  }, [isExportMode, fitEnabled, viewMode]);
+  }, [isExportMode]);
 
   useEffect(() => {
     syncLeftScroll();
     return () => {
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
     };
-  }, [isExportMode, viewMode, tasks.length]);
+  }, [
+    isExportMode,
+    fitEnabled,
+    fitPages,
+    viewMode,
+    tasks.length,
+    totalDays,
+    viewportRect.width,
+    viewportRect.height,
+  ]);
+
+  useEffect(() => {
+    if (isExportMode) return;
+    const leftPane = leftPaneRef.current;
+    if (!leftPane) return;
+
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+    const handleWheel = (event) => {
+      if (event.ctrlKey) return;
+      const viewport = viewportRef.current;
+      if (!viewport) return;
+
+      const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1;
+      let rawDeltaX = event.deltaX;
+      let rawDeltaY = event.deltaY;
+      if (event.shiftKey && rawDeltaX === 0) {
+        rawDeltaX = rawDeltaY;
+        rawDeltaY = 0;
+      }
+      const deltaY = rawDeltaY * scale;
+      const deltaX = rawDeltaX * scale;
+
+      const maxScrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      const maxScrollLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+
+      const nextTop = clamp(viewport.scrollTop + deltaY, 0, maxScrollTop);
+      const nextLeft = fitEnabled ? viewport.scrollLeft : clamp(viewport.scrollLeft + deltaX, 0, maxScrollLeft);
+
+      if (nextTop === viewport.scrollTop && nextLeft === viewport.scrollLeft) return;
+
+      event.preventDefault();
+      viewport.scrollTop = nextTop;
+      if (!fitEnabled) viewport.scrollLeft = nextLeft;
+    };
+
+    leftPane.addEventListener('wheel', handleWheel, { passive: false });
+    return () => leftPane.removeEventListener('wheel', handleWheel);
+  }, [isExportMode, fitEnabled]);
 
   const config = {
     Day: { colWidth: 60 },
@@ -102,12 +349,25 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
   const pages = Math.max(1, Number(fitPages || 1));
 
   let colWidth = baseColWidth;
-  if (!isExportMode && fitEnabled && viewportWidth > 0) {
-    colWidth = viewportWidth / (Math.max(1, totalDays) * pages);
+  if (!isExportMode && fitEnabled && viewportRect.width > 0) {
+    colWidth = viewportRect.width / (Math.max(1, totalDays) * pages);
     colWidth = Math.min(baseColWidth, Math.max(1, colWidth));
   }
 
   const chartWidth = totalDays * colWidth;
+
+  const rowCount = tasks.length;
+  const enableRowVirtualization = !isExportMode && rowCount > 80;
+  const rowStart = enableRowVirtualization ? Math.max(0, Math.min(rowCount, rowWindow.start)) : 0;
+  const rowEnd = enableRowVirtualization ? Math.max(rowStart, Math.min(rowCount, rowWindow.end)) : rowCount;
+  const visibleTasks = enableRowVirtualization ? tasks.slice(rowStart, rowEnd) : tasks;
+  const rowTopSpacerPx = enableRowVirtualization ? rowStart * ROW_HEIGHT_PX : 0;
+  const rowBottomSpacerPx = enableRowVirtualization ? (rowCount - rowEnd) * ROW_HEIGHT_PX : 0;
+
+  const enableColVirtualization =
+    !isExportMode && !fitEnabled && totalDays > 120 && Number.isFinite(colWidth) && colWidth > 0;
+  const colStart = enableColVirtualization ? Math.max(0, Math.min(totalDays, colWindow.start)) : 0;
+  const colEnd = enableColVirtualization ? Math.max(colStart, Math.min(totalDays, colWindow.end)) : totalDays;
 
   const renderDoubleHeader = () => {
     const topHeaders = [];
@@ -142,7 +402,17 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
         tempDate = new Date(checkDate);
       }
       let bottomDate = new Date(minDate);
-      for (let i = 0; i < totalDays; i += 1) {
+      bottomDate.setDate(bottomDate.getDate() + colStart);
+      if (colStart > 0) {
+        bottomHeaders.push(
+          <div
+            key="bot-spacer-left"
+            className="shrink-0"
+            style={{ width: `${colStart * colWidth}px`, boxSizing: 'border-box' }}
+          />,
+        );
+      }
+      for (let i = colStart; i < colEnd; i += 1) {
         const dayName = getKoreanDay(bottomDate);
         const isWeekend = dayName === '토' || dayName === '일';
         bottomHeaders.push(
@@ -157,6 +427,15 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
           </div>,
         );
         bottomDate.setDate(bottomDate.getDate() + 1);
+      }
+      if (colEnd < totalDays) {
+        bottomHeaders.push(
+          <div
+            key="bot-spacer-right"
+            className="shrink-0"
+            style={{ width: `${(totalDays - colEnd) * colWidth}px`, boxSizing: 'border-box' }}
+          />,
+        );
       }
     } else if (viewMode === 'Week') {
       let tempDate = new Date(minDate);
@@ -182,9 +461,19 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
         tempDate = new Date(checkDate);
       }
       let bottomDate = new Date(minDate);
-      for (let i = 0; i < totalDays; i += 1) {
+      bottomDate.setDate(bottomDate.getDate() + colStart);
+      if (colStart > 0) {
+        bottomHeaders.push(
+          <div
+            key="bot-w-spacer-left"
+            className="shrink-0"
+            style={{ width: `${colStart * colWidth}px`, boxSizing: 'border-box' }}
+          />,
+        );
+      }
+      for (let i = colStart; i < colEnd; i += 1) {
         const isMonday = bottomDate.getDay() === 1;
-        const showLabel = isMonday || i === 0;
+        const showLabel = isMonday || i === colStart;
         const isWeekend = bottomDate.getDay() === 0 || bottomDate.getDay() === 6;
         bottomHeaders.push(
           <div
@@ -202,6 +491,15 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
           </div>,
         );
         bottomDate.setDate(bottomDate.getDate() + 1);
+      }
+      if (colEnd < totalDays) {
+        bottomHeaders.push(
+          <div
+            key="bot-w-spacer-right"
+            className="shrink-0"
+            style={{ width: `${(totalDays - colEnd) * colWidth}px`, boxSizing: 'border-box' }}
+          />,
+        );
       }
     } else if (viewMode === 'Month') {
       let tempDate = new Date(minDate);
@@ -259,8 +557,20 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
   const renderGridBackground = () => {
     const grids = [];
     let d = new Date(minDate);
+    d.setDate(d.getDate() + colStart);
+
+    if (colStart > 0) {
+      grids.push(
+        <div
+          key="grid-spacer-left"
+          className="shrink-0 h-full"
+          style={{ width: `${colStart * colWidth}px`, boxSizing: 'border-box' }}
+        />,
+      );
+    }
+
     if (viewMode === 'Month') {
-      for (let i = 0; i < totalDays; i += 1) {
+      for (let i = colStart; i < colEnd; i += 1) {
         const isMonthStart = d.getDate() === 1;
         grids.push(
           <div
@@ -272,7 +582,7 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
         d.setDate(d.getDate() + 1);
       }
     } else {
-      for (let i = 0; i < totalDays; i += 1) {
+      for (let i = colStart; i < colEnd; i += 1) {
         const dayName = getKoreanDay(d);
         const isWeekend = dayName === '토' || dayName === '일';
         const isMonthStart = d.getDate() === 1;
@@ -286,6 +596,17 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
         d.setDate(d.getDate() + 1);
       }
     }
+
+    if (colEnd < totalDays) {
+      grids.push(
+        <div
+          key="grid-spacer-right"
+          className="shrink-0 h-full"
+          style={{ width: `${(totalDays - colEnd) * colWidth}px`, boxSizing: 'border-box' }}
+        />,
+      );
+    }
+
     return grids;
   };
 
@@ -341,7 +662,7 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
     return overlays;
   };
 
-  const renderTodayLine = () => {
+  const renderTodayOverlay = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const min = new Date(minDate);
@@ -355,15 +676,19 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
 
     return (
       <div
+        ref={todayOverlayRef}
         data-gantt-today="true"
-        className="absolute top-0 bottom-0 z-20 pointer-events-none"
+        className="absolute top-0 bottom-0 z-30 pointer-events-none"
         style={{ left: `${left}px` }}
       >
-            <div
-              className="absolute top-0 bottom-0 border-l-2 border-rose-500"
-              style={{ left: '-1px', borderStyle: 'dashed' }}
-            />
-        <div className="absolute top-2 left-0 -translate-x-1/2 bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap leading-none">
+        <div
+          className="absolute border-l-2 border-rose-500"
+          style={{ top: `${HEADER_HEIGHT_PX}px`, bottom: 0, left: '-1px', borderStyle: 'dashed' }}
+        />
+        <div
+          className="absolute left-0 -translate-x-1/2 bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap leading-none"
+          style={{ top: `${HEADER_HEIGHT_PX + 8}px` }}
+        >
           Today
         </div>
       </div>
@@ -372,12 +697,12 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
 
   const headerEl = useMemo(
     () => renderDoubleHeader(),
-    [viewMode, totalDays, colWidth, minDate.getTime()],
+    [viewMode, totalDays, colWidth, minDate.getTime(), colStart, colEnd],
   );
 
   const gridBackgroundEl = useMemo(
     () => renderGridBackground(),
-    [viewMode, totalDays, colWidth, minDate.getTime()],
+    [viewMode, totalDays, colWidth, minDate.getTime(), colStart, colEnd],
   );
 
   const vacationOverlaysEl = useMemo(
@@ -393,6 +718,7 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
     <div id={isExportMode ? exportId : 'gantt-main'} className={containerClass}>
       <div className={`flex flex-1 ${isExportMode ? 'overflow-visible' : 'overflow-hidden'}`}>
         <div
+          ref={leftPaneRef}
           className={`${isExportMode ? 'w-80' : 'w-64'} border-r border-indigo-100 bg-white flex flex-col z-10 shadow-[4px_0_10px_-3px_rgba(0,0,0,0.05)]`}
         >
           <div className="h-[68px] border-b border-indigo-100 bg-white flex items-center px-5 font-bold text-xs text-slate-400 uppercase tracking-wider">
@@ -400,7 +726,8 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
           </div>
           <div className={`${isExportMode ? 'overflow-visible h-auto' : 'overflow-hidden flex-1 relative'}`}>
             <div ref={leftRowsRef} style={isExportMode ? undefined : { willChange: 'transform' }}>
-              {tasks.map((task) => (
+              {rowTopSpacerPx > 0 && <div style={{ height: `${rowTopSpacerPx}px` }} />}
+              {visibleTasks.map((task) => (
                 <div
                   key={task.id}
                   className={`${isExportMode ? 'h-14 py-1' : 'h-14 items-center'} border-b border-slate-50 px-5 flex text-sm transition-colors ${isExportMode ? '' : 'hover:bg-slate-50'}`}
@@ -432,30 +759,36 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
                   </div>
                 </div>
               ))}
+              {rowBottomSpacerPx > 0 && <div style={{ height: `${rowBottomSpacerPx}px` }} />}
             </div>
           </div>
         </div>
 
         <div
-          ref={viewportRef}
-          onScroll={syncLeftScroll}
-          className={`${isExportMode ? 'relative overflow-visible' : 'flex-1 relative custom-scrollbar'} ${isExportMode ? '' : fitEnabled ? 'overflow-x-hidden overflow-y-auto' : 'overflow-auto'}`}
+          className={isExportMode ? 'relative overflow-visible' : 'flex-1 relative overflow-hidden'}
           style={isExportMode ? { width: `${chartWidth}px` } : undefined}
         >
-          <div style={{ width: `${chartWidth}px`, minWidth: '100%' }}>
-            <div className={isExportMode ? '' : 'gantt-header-sticky'}>{headerEl}</div>
+          {renderTodayOverlay()}
+          <div
+            ref={viewportRef}
+            onScroll={syncLeftScroll}
+            className={`${isExportMode ? 'relative overflow-visible' : 'h-full w-full custom-scrollbar'} ${isExportMode ? '' : fitEnabled ? 'overflow-x-hidden overflow-y-auto' : 'overflow-auto'}`}
+          >
+            <div style={{ width: `${chartWidth}px`, minWidth: '100%' }}>
+              <div className={isExportMode ? '' : 'gantt-header-sticky'}>{headerEl}</div>
 
-            <div className="relative">
-              <div className="absolute inset-0 flex pointer-events-none z-0">{gridBackgroundEl}</div>
+              <div className="relative">
+                <div className="absolute inset-0 flex pointer-events-none z-0">{gridBackgroundEl}</div>
 
-              <div className="absolute inset-0 z-5 pointer-events-none">{vacationOverlaysEl}</div>
+                <div className="absolute inset-0 z-5 pointer-events-none">{vacationOverlaysEl}</div>
 
-              {renderTodayLine()}
-
-              <div className="z-10 relative">
-                {tasks.map((task) => {
-                  const s = task.start;
-                  const e = task.end || task.start;
+                <div className="z-10 relative">
+                  {rowTopSpacerPx > 0 && <div style={{ height: `${rowTopSpacerPx}px` }} />}
+                  {visibleTasks.map((task) => {
+                  const preview = dragPreview && dragPreview.taskId === task.id ? dragPreview : null;
+                  const s = preview ? preview.start : task.start;
+                  const e = preview ? preview.end : task.end || task.start;
+                  const isDraggingThis = !!preview;
                   if (!s) {
                     return (
                       <div key={task.id} className="h-14 border-b border-slate-50 relative flex items-center">
@@ -499,10 +832,31 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
                   return (
                     <div key={task.id} className="h-14 border-b border-slate-50 relative group flex items-center">
                       <div
-                        className={`absolute h-7 rounded-full flex items-center transition-all duration-300 hover:scale-[1.02] hover:shadow-lg ${barClass}`}
+                        onPointerDown={isInteractive ? (e) => startDrag(e, task, 'move') : undefined}
+                        className={`absolute h-7 rounded-full flex items-center transition-all duration-300 hover:scale-[1.02] hover:shadow-lg touch-none ${
+                          isInteractive ? (isDraggingThis ? 'cursor-grabbing ring-2 ring-indigo-200' : 'cursor-grab') : ''
+                        } ${barClass}`}
                         style={{ left: `${left}px`, width: `${width}px` }}
                         title={`${task.taskName} (${task.progress}%) - ${s} ~ ${e}`}
                       >
+                        {isInteractive && (
+                          <>
+                            <div
+                              className="absolute left-0 top-0 bottom-0 w-2 rounded-l-full cursor-ew-resize hover:bg-white/20"
+                              onPointerDown={(e) => {
+                                e.stopPropagation();
+                                startDrag(e, task, 'resizeStart');
+                              }}
+                            />
+                            <div
+                              className="absolute right-0 top-0 bottom-0 w-2 rounded-r-full cursor-ew-resize hover:bg-white/20"
+                              onPointerDown={(e) => {
+                                e.stopPropagation();
+                                startDrag(e, task, 'resizeEnd');
+                              }}
+                            />
+                          </>
+                        )}
                         <div className="absolute inset-0 rounded-full overflow-hidden">
                           <div
                             className="absolute left-0 top-0 bottom-0 bg-white/20"
@@ -516,6 +870,8 @@ function GanttChart({ tasks, vacations = [], viewMode = 'Day', rangePadding = { 
                     </div>
                   );
                 })}
+                  {rowBottomSpacerPx > 0 && <div style={{ height: `${rowBottomSpacerPx}px` }} />}
+                </div>
               </div>
             </div>
           </div>

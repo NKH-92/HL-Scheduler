@@ -10,6 +10,7 @@ import ReportModal from './components/modals/ReportModal';
 import TaskEditModal from './components/modals/TaskEditModal';
 import {
   INITIAL_TASKS,
+  generateId,
   defaultFitSettings,
   defaultRangePadding,
   newTaskTemplate,
@@ -172,6 +173,7 @@ function App() {
         start: task.start || '',
         end: task.end || task.start || '',
         progress: Number(task.progress || 0),
+        memo: task.memo || '',
       });
     } else {
       setEditingTask(null);
@@ -188,12 +190,12 @@ function App() {
 
     const rawProgress = Number(formData.progress);
     const progress = Number.isFinite(rawProgress) ? Math.max(0, Math.min(100, rawProgress)) : 0;
-    const payload = { ...formData, progress, end: formData.end || formData.start || '' };
+    const payload = { ...formData, progress, end: formData.end || formData.start || '', memo: String(formData.memo ?? '') };
 
     if (editingTask) {
       setTasks((prev) => prev.map((t) => (t.id === editingTask.id ? { ...payload, id: t.id } : t)));
     } else {
-      setTasks((prev) => [...prev, { ...payload, id: Date.now() }]);
+      setTasks((prev) => [...prev, { ...payload, id: generateId() }]);
     }
 
     setIsModalOpen(false);
@@ -249,6 +251,31 @@ function App() {
     });
   };
 
+  const updateTaskDates = (taskId, start, end) => {
+    const nextStart = String(start || '').trim();
+    if (!nextStart) return;
+    const nextEnd = String(end || '').trim() || nextStart;
+
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id !== taskId) return t;
+        if (t.start === nextStart && (t.end || t.start) === nextEnd) return t;
+        return { ...t, start: nextStart, end: nextEnd };
+      }),
+    );
+  };
+
+  const updateTaskMemo = (taskId, memo) => {
+    const nextMemo = String(memo ?? '');
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id !== taskId) return t;
+        if (String(t.memo ?? '') === nextMemo) return t;
+        return { ...t, memo: nextMemo };
+      }),
+    );
+  };
+
   const addVacation = () => {
     if (!vacForm.start) {
       alert('휴가 시작일이 누락되었습니다.');
@@ -265,7 +292,7 @@ function App() {
     }
 
     const payload = {
-      id: Date.now(),
+      id: generateId(),
       title: (vacForm.title || '휴가').trim() || '휴가',
       start,
       end,
@@ -523,6 +550,93 @@ function App() {
     }
   };
 
+  const exportProjectXlsx = async () => {
+    try {
+      const xlsxModule = await import('xlsx');
+      const XLSX = xlsxModule.default ?? xlsxModule;
+      if (!XLSX?.utils?.book_new) throw new Error('xlsx module not available');
+
+      const toDurationDays = (start, end) => {
+        const s = toUtcMidnightMs(start);
+        const e = toUtcMidnightMs(end || start);
+        if (!Number.isFinite(s) || !Number.isFinite(e)) return '';
+        return Math.max(1, Math.round((e - s) / 86400000) + 1);
+      };
+
+      const wb = XLSX.utils.book_new();
+      const today = formatDate(new Date());
+      const safeProjectName = projectName || 'Project';
+
+      const tasksSheet = XLSX.utils.aoa_to_sheet([
+        ['Category', 'Task Name', 'Department', 'Assignee', 'Start', 'End', 'Duration(days)', 'Progress(%)', 'Memo'],
+        ...tasks.map((t) => [
+          t.category || '',
+          t.taskName || '',
+          t.department || '',
+          t.assignee || '',
+          t.start || '',
+          t.end || t.start || '',
+          toDurationDays(t.start, t.end),
+          Number.isFinite(Number(t.progress)) ? Number(t.progress) : 0,
+          String(t.memo ?? ''),
+        ]),
+      ]);
+
+      tasksSheet['!cols'] = [
+        { wch: 14 },
+        { wch: 28 },
+        { wch: 16 },
+        { wch: 14 },
+        { wch: 12 },
+        { wch: 12 },
+        { wch: 14 },
+        { wch: 12 },
+        { wch: 40 },
+      ];
+
+      XLSX.utils.book_append_sheet(wb, tasksSheet, 'Tasks');
+
+      const vacationsSheet = XLSX.utils.aoa_to_sheet([
+        ['Title', 'Start', 'End'],
+        ...vacations.map((v) => [v.title || '', v.start || '', v.end || v.start || '']),
+      ]);
+
+      vacationsSheet['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 12 }];
+      XLSX.utils.book_append_sheet(wb, vacationsSheet, 'Vacations');
+
+      const completed = tasks.filter((t) => t.progress === 100).length;
+      const totalProgress = tasks.length === 0 ? 0 : Math.round(tasks.reduce((acc, curr) => acc + curr.progress, 0) / tasks.length);
+
+      const summarySheet = XLSX.utils.aoa_to_sheet([
+        ['Project Name', safeProjectName],
+        ['Exported At', today],
+        ['Total Tasks', tasks.length],
+        ['Completed Tasks', completed],
+        ['Total Progress(%)', totalProgress],
+        ['Vacations', vacations.length],
+      ]);
+      summarySheet['!cols'] = [{ wch: 18 }, { wch: 40 }];
+      XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
+
+      const data = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${sanitizeFileName(safeProjectName, 'HL-Scheduler')}_Export_${today}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error(error);
+      alert('엑셀(XLSX) 내보내기 중 오류가 발생했습니다.');
+    }
+  };
+
   const saveProjectFile = () => {
     const data = { name: projectName, tasks, vacations, rangePadding, fitSettings };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
@@ -579,6 +693,8 @@ function App() {
               projectName={projectName}
               setProjectName={setProjectName}
               openReportModal={() => setIsReportModalOpen(true)}
+              onExportXlsx={exportProjectXlsx}
+              updateTaskMemo={updateTaskMemo}
             />
           </div>
         );
@@ -589,6 +705,7 @@ function App() {
             tasks={tasks}
             filteredTasks={filteredTasks}
             vacations={vacations}
+            onTaskDateChange={updateTaskDates}
             vacForm={vacForm}
             setVacForm={setVacForm}
             addVacation={addVacation}

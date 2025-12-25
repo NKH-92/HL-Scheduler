@@ -97,6 +97,16 @@ function TaskEditModal({ isOpen, onClose, editingTask, formData, setFormData, on
             onChange={(e) => setFormData({ ...formData, progress: Number(e.target.value) })}
           />
         </div>
+
+        <div className="col-span-2 space-y-1">
+          <label className="text-xs font-bold text-slate-500 uppercase">Memo</label>
+          <textarea
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-y min-h-[96px]"
+            placeholder="진행 중 특이사항 / 이슈를 기록하세요."
+            value={formData.memo || ''}
+            onChange={(e) => setFormData({ ...formData, memo: e.target.value })}
+          />
+        </div>
       </div>
 
       <div className="bg-slate-50 px-8 py-5 border-t border-slate-100 flex justify-end gap-3">

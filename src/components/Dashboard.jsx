@@ -10,11 +10,13 @@ function Dashboard({ tasks, projectName }) {
   const completed = useMemo(() => tasks.filter((t) => t.progress === 100).length, [tasks]);
 
   const deptStats = useMemo(() => {
+    const normalizeDept = (value) => String(value ?? '').trim() || '미지정';
     const stats = {};
     tasks.forEach((t) => {
-      if (!stats[t.department]) stats[t.department] = { sum: 0, count: 0 };
-      stats[t.department].sum += t.progress;
-      stats[t.department].count += 1;
+      const dept = normalizeDept(t.department);
+      if (!stats[dept]) stats[dept] = { sum: 0, count: 0 };
+      stats[dept].sum += t.progress;
+      stats[dept].count += 1;
     });
     return Object.entries(stats).map(([dept, data]) => ({ name: dept, avg: Math.round(data.sum / data.count) }));
   }, [tasks]);

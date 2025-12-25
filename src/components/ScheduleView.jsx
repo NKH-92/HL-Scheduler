@@ -6,6 +6,7 @@ function ScheduleView({
   tasks,
   filteredTasks,
   vacations,
+  onTaskDateChange,
   vacForm,
   setVacForm,
   addVacation,
@@ -222,14 +223,17 @@ function ScheduleView({
           </div>
         </div>
 
-        <GanttChart
-          tasks={filteredTasks}
-          vacations={vacations}
-          viewMode={ganttViewMode}
-          rangePadding={rangePadding[ganttViewMode] || { before: 0, after: 0 }}
-          fitEnabled={(fitSettings[ganttViewMode] || {}).enabled || false}
-          fitPages={(fitSettings[ganttViewMode] || {}).pages || 1}
-        />
+        <div className="flex-1 min-h-0">
+          <GanttChart
+            tasks={filteredTasks}
+            vacations={vacations}
+            viewMode={ganttViewMode}
+            rangePadding={rangePadding[ganttViewMode] || { before: 0, after: 0 }}
+            fitEnabled={(fitSettings[ganttViewMode] || {}).enabled || false}
+            fitPages={(fitSettings[ganttViewMode] || {}).pages || 1}
+            onTaskDateChange={onTaskDateChange}
+          />
+        </div>
 
         {isImageExportModalOpen && exportScope === 'full' && (
           <div style={{ position: 'fixed', left: '-9999px', top: '0px', pointerEvents: 'none' }}>

@@ -32,10 +32,6 @@
   background-color: #94a3b8;
 }
 
-.print-hidden {
-  display: none;
-}
-
 .gantt-header-sticky {
   position: sticky;
   top: 0;

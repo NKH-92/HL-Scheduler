@@ -15,7 +15,7 @@ function AppHeader({ activeTab, onTabChange, onSaveProject, onImportFile }) {
           </div>
           <div>
             <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">HL-Scheduler</h1>
-            <span className="text-[10px] font-semibold text-indigo-500 tracking-wider">nkh92@hanlim.com</span>
+            <span className="text-[10px] font-semibold text-indigo-500 tracking-wider">프로젝트 스케줄러</span>
           </div>
         </div>
 
@@ -39,6 +39,22 @@ function AppHeader({ activeTab, onTabChange, onSaveProject, onImportFile }) {
             label="대시보드"
           />
         </nav>
+
+        <div className="md:hidden">
+          <label className="sr-only" htmlFor="mobile-tab-select">
+            탭 선택
+          </label>
+          <select
+            id="mobile-tab-select"
+            value={activeTab}
+            onChange={(e) => onTabChange(e.target.value)}
+            className="bg-slate-100/50 border border-slate-200/50 rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+          >
+            <option value="tasks">업무 관리</option>
+            <option value="schedule">스케줄</option>
+            <option value="dashboard">대시보드</option>
+          </select>
+        </div>
 
         <div className="flex items-center gap-2">
           <button

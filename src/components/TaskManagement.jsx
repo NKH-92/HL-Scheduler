@@ -1,12 +1,93 @@
-import { useMemo, useState } from 'react';
-import { FileText, Plus, Edit2, Trash2 } from './Icons';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Edit2, FileText, Plus, Trash2 } from './Icons';
 
 const normalizeValue = (value) => String(value ?? '').trim();
 
-function TaskManagement({ tasks, openModal, handleDelete, moveTask, moveTaskToIndex, sortTasksByStart, projectName, setProjectName, openReportModal }) {
+function TaskManagement({
+  tasks,
+  openModal,
+  handleDelete,
+  moveTask,
+  moveTaskToIndex,
+  sortTasksByStart,
+  projectName,
+  setProjectName,
+  openReportModal,
+  onExportXlsx,
+  updateTaskMemo,
+}) {
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
   const [startSortDir, setStartSortDir] = useState('');
+  const [activeMemoKey, setActiveMemoKey] = useState(null);
+  const [memoDrafts, setMemoDrafts] = useState(() => ({}));
+  const memoCommitTimersRef = useRef(new Map());
+  const pendingMemoKeysRef = useRef(new Set());
+
+  useEffect(() => {
+    setMemoDrafts((prev) => {
+      const next = { ...prev };
+      const pending = pendingMemoKeysRef.current;
+      const taskKeys = new Set(tasks.map((t) => String(t.id)));
+      let changed = false;
+
+      Object.keys(next).forEach((key) => {
+        if (!taskKeys.has(key)) {
+          delete next[key];
+          pending.delete(key);
+          changed = true;
+        }
+      });
+
+      tasks.forEach((task) => {
+        const key = String(task.id);
+        if (key === activeMemoKey) return;
+        if (next[key] == null) return;
+
+        const memo = String(task.memo ?? '');
+        if (next[key] === memo) {
+          delete next[key];
+          pending.delete(key);
+          changed = true;
+        } else if (!pending.has(key)) {
+          delete next[key];
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [tasks, activeMemoKey]);
+
+  const scheduleMemoCommit = (taskId, nextMemo) => {
+    const key = String(taskId);
+    pendingMemoKeysRef.current.add(key);
+
+    const timers = memoCommitTimersRef.current;
+    const existing = timers.get(key);
+    if (existing) window.clearTimeout(existing);
+
+    const timerId = window.setTimeout(() => {
+      timers.delete(key);
+      updateTaskMemo(taskId, nextMemo);
+    }, 500);
+
+    timers.set(key, timerId);
+  };
+
+  const flushMemoCommit = (taskId, nextMemo) => {
+    const key = String(taskId);
+    pendingMemoKeysRef.current.add(key);
+
+    const timers = memoCommitTimersRef.current;
+    const existing = timers.get(key);
+    if (existing) {
+      window.clearTimeout(existing);
+      timers.delete(key);
+    }
+
+    updateTaskMemo(taskId, nextMemo);
+  };
 
   const departments = useMemo(() => {
     const set = new Set();
@@ -82,13 +163,21 @@ function TaskManagement({ tasks, openModal, handleDelete, moveTask, moveTaskToIn
             className="w-full text-lg font-bold text-slate-800 border-b-2 border-slate-200 focus:border-indigo-500 focus:outline-none py-1 transition-colors bg-transparent placeholder-slate-300"
           />
         </div>
-        <div className="flex items-center gap-2 w-full md:w-auto">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
           <button
             onClick={openReportModal}
             className="w-full md:w-auto flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-indigo-700 transition-colors shadow-sm whitespace-nowrap"
             type="button"
           >
             <FileText size={18} /> 보고서 출력
+          </button>
+          <button
+            onClick={onExportXlsx}
+            disabled={!onExportXlsx}
+            className="w-full md:w-auto flex items-center justify-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors shadow-sm whitespace-nowrap"
+            type="button"
+          >
+            <Download size={18} /> Excel(XLSX)
           </button>
         </div>
       </div>
@@ -196,13 +285,14 @@ function TaskManagement({ tasks, openModal, handleDelete, moveTask, moveTaskToIn
                 <th className="px-4 py-3 whitespace-nowrap">담당자</th>
                 <th className="px-4 py-3 whitespace-nowrap">기간</th>
                 <th className="px-4 py-3 text-center whitespace-nowrap">진척도</th>
+                <th className="px-4 py-3 whitespace-nowrap min-w-[240px]">메모</th>
                 <th className="px-4 py-3 text-right whitespace-nowrap">관리</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {visibleTasks.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan="9" className="px-4 py-8 text-center text-slate-400">
                     {tasks.length === 0 ? '등록된 업무가 없습니다.' : '조건에 맞는 업무가 없습니다.'}
                   </td>
                 </tr>
@@ -247,6 +337,27 @@ function TaskManagement({ tasks, openModal, handleDelete, moveTask, moveTaskToIn
                         </div>
                         <span className="text-xs">{task.progress}%</span>
                       </div>
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <textarea
+                        value={memoDrafts[String(task.id)] ?? String(task.memo ?? '')}
+                        onFocus={() => setActiveMemoKey(String(task.id))}
+                        onChange={(e) => {
+                          const key = String(task.id);
+                          const nextMemo = e.target.value;
+                          setMemoDrafts((prev) => (prev[key] === nextMemo ? prev : { ...prev, [key]: nextMemo }));
+                          scheduleMemoCommit(task.id, nextMemo);
+                        }}
+                        onBlur={(e) => {
+                          const key = String(task.id);
+                          const nextMemo = e.target.value;
+                          setActiveMemoKey((prev) => (prev === key ? null : prev));
+                          flushMemoCommit(task.id, nextMemo);
+                        }}
+                        placeholder="진행 중 특이사항을 기록하세요."
+                        rows={2}
+                        className="w-full min-w-[240px] bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-y"
+                      />
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-2">
