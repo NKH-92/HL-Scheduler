@@ -21,11 +21,14 @@ function ScheduleView({
   updatePadding,
   fitSettings,
   updateFit,
+  zoomSettings,
+  updateZoom,
   openImageExportModal,
   isImageExportModalOpen,
   exportScope,
 }) {
   const rangeUnit = ganttViewMode === 'Day' ? '일' : ganttViewMode === 'Week' ? '주' : '월';
+  const zoomValue = Math.round(Number(zoomSettings?.[ganttViewMode] ?? 100)) || 100;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -212,6 +215,43 @@ function ScheduleView({
               />
             </div>
 
+            <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
+              <span className="font-semibold text-slate-500">Zoom</span>
+              <button
+                type="button"
+                onClick={() => updateZoom(zoomValue - 10)}
+                className="w-6 h-6 rounded bg-white border border-slate-200 text-slate-600 font-bold leading-none hover:bg-slate-50"
+                aria-label="Zoom out"
+              >
+                -
+              </button>
+              <input
+                type="range"
+                min="25"
+                max="300"
+                step="5"
+                value={zoomValue}
+                onChange={(e) => updateZoom(e.target.value)}
+                className="w-28 accent-indigo-600"
+              />
+              <button
+                type="button"
+                onClick={() => updateZoom(zoomValue + 10)}
+                className="w-6 h-6 rounded bg-white border border-slate-200 text-slate-600 font-bold leading-none hover:bg-slate-50"
+                aria-label="Zoom in"
+              >
+                +
+              </button>
+              <button
+                type="button"
+                onClick={() => updateZoom(100)}
+                className="px-2 h-6 rounded bg-white border border-slate-200 text-slate-500 font-bold text-[10px] hover:bg-slate-50 tabular-nums"
+                title="Reset zoom"
+              >
+                {zoomValue}%
+              </button>
+            </div>
+
             <button
               onClick={openImageExportModal}
               className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-1.5 rounded-lg font-bold shadow-sm shadow-emerald-200 transition-all flex items-center gap-1"
@@ -231,6 +271,7 @@ function ScheduleView({
             rangePadding={rangePadding[ganttViewMode] || { before: 0, after: 0 }}
             fitEnabled={(fitSettings[ganttViewMode] || {}).enabled || false}
             fitPages={(fitSettings[ganttViewMode] || {}).pages || 1}
+            zoom={zoomValue / 100}
             onTaskDateChange={onTaskDateChange}
           />
         </div>
@@ -242,6 +283,7 @@ function ScheduleView({
               vacations={vacations}
               viewMode={ganttViewMode}
               rangePadding={rangePadding[ganttViewMode] || { before: 0, after: 0 }}
+              zoom={zoomValue / 100}
               isExportMode
               exportId="gantt-image-export-target"
             />

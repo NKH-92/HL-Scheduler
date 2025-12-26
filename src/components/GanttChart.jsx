@@ -8,6 +8,7 @@ function GanttChart({
   rangePadding = { before: 0, after: 0 },
   fitEnabled = false,
   fitPages = 1,
+  zoom = 1,
   isExportMode = false,
   exportId = 'gantt-export-target',
   onTaskDateChange,
@@ -37,8 +38,9 @@ function GanttChart({
     }
 
     if (viewMode === 'Week') {
-      min.setDate(min.getDate() - min.getDay());
-      max.setDate(max.getDate() + (6 - max.getDay()));
+      const getMondayIndex = (date) => (date.getDay() + 6) % 7; // Monday=0 ... Sunday=6
+      min.setDate(min.getDate() - getMondayIndex(min));
+      max.setDate(max.getDate() + (6 - getMondayIndex(max)));
     } else if (viewMode === 'Month') {
       min.setDate(1);
       max = new Date(max.getFullYear(), max.getMonth() + 1, 0);
@@ -345,13 +347,18 @@ function GanttChart({
     Month: { colWidth: 8 },
   };
 
+  const rawZoom = Number(zoom);
+  const zoomFactor = Number.isFinite(rawZoom) ? rawZoom : 1;
+  const clampedZoom = Math.max(0.25, Math.min(4, zoomFactor));
+
   const baseColWidth = config[viewMode].colWidth;
+  const maxColWidth = baseColWidth * clampedZoom;
   const pages = Math.max(1, Number(fitPages || 1));
 
-  let colWidth = baseColWidth;
+  let colWidth = maxColWidth;
   if (!isExportMode && fitEnabled && viewportRect.width > 0) {
     colWidth = viewportRect.width / (Math.max(1, totalDays) * pages);
-    colWidth = Math.min(baseColWidth, Math.max(1, colWidth));
+    colWidth = Math.min(maxColWidth, Math.max(1, colWidth));
   }
 
   const chartWidth = totalDays * colWidth;
@@ -419,7 +426,7 @@ function GanttChart({
           <div
             key={`bot-${i}`}
             className={`${
-              isWeekend ? 'bg-slate-50/80 text-rose-500' : 'bg-white text-slate-500'
+              isWeekend ? 'bg-slate-100/80 text-rose-600' : 'bg-white text-slate-500'
             } ${bottomHeaderBase} ${bottomDate.getDate() === 1 ? 'border-l border-l-indigo-300' : ''}`}
             style={{ width: `${colWidth}px`, boxSizing: 'border-box' }}
           >
@@ -473,18 +480,18 @@ function GanttChart({
       }
       for (let i = colStart; i < colEnd; i += 1) {
         const isMonday = bottomDate.getDay() === 1;
-        const showLabel = isMonday || i === colStart;
+        const showLabel = isMonday;
         const isWeekend = bottomDate.getDay() === 0 || bottomDate.getDay() === 6;
         bottomHeaders.push(
           <div
             key={`bot-w-${i}`}
-            className={`relative ${isWeekend ? 'bg-slate-50/50' : 'bg-white'} ${bottomHeaderBase} ${
+            className={`relative ${isWeekend ? 'bg-slate-100/70' : 'bg-white'} ${bottomHeaderBase} ${
               bottomDate.getDate() === 1 ? 'border-l border-l-indigo-300' : ''
             }`}
             style={{ width: `${colWidth}px`, boxSizing: 'border-box' }}
           >
             {showLabel && (
-              <span className="absolute whitespace-nowrap bg-white/80 backdrop-blur px-1.5 py-0.5 rounded-lg border border-slate-200 z-10 shadow-sm text-slate-700">
+              <span className="absolute left-1 top-1/2 -translate-y-1/2 whitespace-nowrap bg-white/90 backdrop-blur px-1.5 py-0.5 rounded-lg border border-slate-200 z-10 shadow-sm text-slate-700">
                 {bottomDate.getMonth() + 1}/{bottomDate.getDate()} ({getWeekNumber(bottomDate)}주)
               </span>
             )}
@@ -572,10 +579,11 @@ function GanttChart({
     if (viewMode === 'Month') {
       for (let i = colStart; i < colEnd; i += 1) {
         const isMonthStart = d.getDate() === 1;
+        const isWeekend = d.getDay() === 0 || d.getDay() === 6;
         grids.push(
           <div
             key={i}
-            className={`border-r border-r-slate-100 h-full bg-white ${isMonthStart ? 'border-l border-l-indigo-200' : ''}`}
+            className={`border-r border-r-slate-100 h-full ${isWeekend ? 'bg-slate-100/60' : 'bg-white'} ${isMonthStart ? 'border-l border-l-indigo-200' : ''}`}
             style={{ width: `${colWidth}px`, boxSizing: 'border-box' }}
           />,
         );
@@ -589,7 +597,7 @@ function GanttChart({
         grids.push(
           <div
             key={i}
-            className={`border-r h-full ${isWeekend ? 'bg-slate-50/50' : 'bg-white'} ${isMonthStart ? 'border-l border-l-indigo-200' : 'border-slate-100'} border-r-slate-100`}
+            className={`border-r h-full ${isWeekend ? 'bg-slate-100/60' : 'bg-white'} ${isMonthStart ? 'border-l border-l-indigo-200' : 'border-slate-100'} border-r-slate-100`}
             style={{ width: `${colWidth}px`, boxSizing: 'border-box' }}
           />,
         );

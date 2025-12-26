@@ -30,6 +30,16 @@ npm.cmd run dev
 npm.cmd run build
 ```
 
+## 포터블 EXE (오프라인 배포)
+
+Windows에서 설치 없이 실행되는 단일 `exe`로 패키징합니다.
+
+```bash
+npm.cmd run dist:portable
+```
+
+결과물: `release/Scheduler-<version>.exe` (이 파일만 다른 PC로 복사해서 실행하면 됩니다.)
+
 ## 메모
 
 - 스타일은 Tailwind를 빌드 파이프라인(PostCSS)로 처리합니다(더 이상 CDN 사용하지 않음).

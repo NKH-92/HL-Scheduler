@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import TabButton from './TabButton';
-import { BarChart2, CalendarIcon, CheckSquare, Layout, Save, Upload } from './Icons';
+import { BarChart2, CalendarIcon, CheckSquare, Info, Layout, Save, Upload } from './Icons';
 
 function AppHeader({ activeTab, onTabChange, onSaveProject, onImportFile }) {
   const fileInputRef = useRef(null);
@@ -38,6 +38,12 @@ function AppHeader({ activeTab, onTabChange, onSaveProject, onImportFile }) {
             icon={<BarChart2 size={16} />}
             label="대시보드"
           />
+          <TabButton
+            active={activeTab === 'help'}
+            onClick={() => onTabChange('help')}
+            icon={<Info size={16} />}
+            label="Help"
+          />
         </nav>
 
         <div className="md:hidden">
@@ -53,6 +59,7 @@ function AppHeader({ activeTab, onTabChange, onSaveProject, onImportFile }) {
             <option value="tasks">업무 관리</option>
             <option value="schedule">스케줄</option>
             <option value="dashboard">대시보드</option>
+            <option value="help">Help</option>
           </select>
         </div>
 

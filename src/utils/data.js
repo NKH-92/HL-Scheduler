@@ -87,6 +87,12 @@ export const defaultFitSettings = {
   Month: { enabled: false, pages: 1 },
 };
 
+export const defaultZoomSettings = {
+  Day: 100,
+  Week: 100,
+  Month: 100,
+};
+
 export const newTaskTemplate = () => {
   const today = formatDate(new Date());
   return { category: '', taskName: '', department: '', assignee: '', start: today, end: today, progress: 0, memo: '' };

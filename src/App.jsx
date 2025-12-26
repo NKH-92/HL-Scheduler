@@ -3,6 +3,7 @@ import html2canvas from 'html2canvas';
 import { toJpeg, toPng } from 'html-to-image';
 import AppHeader from './components/AppHeader';
 import Dashboard from './components/Dashboard';
+import Help from './components/Help';
 import ScheduleView from './components/ScheduleView';
 import TaskManagement from './components/TaskManagement';
 import ImageExportModal from './components/modals/ImageExportModal';
@@ -13,6 +14,7 @@ import {
   generateId,
   defaultFitSettings,
   defaultRangePadding,
+  defaultZoomSettings,
   newTaskTemplate,
   normalizeTasks,
   normalizeVacations,
@@ -38,6 +40,7 @@ const STORAGE_KEYS = {
   vacations: { current: 'hlSchedulerVacations', legacy: 'proSchedulerVacations' },
   rangePadding: { current: 'hlSchedulerRangePadding', legacy: 'proSchedulerRangePadding' },
   fitSettings: { current: 'hlSchedulerFitSettings', legacy: 'proSchedulerFitSettings' },
+  zoomSettings: { current: 'hlSchedulerZoomSettings', legacy: 'proSchedulerZoomSettings' },
 };
 
 const readStorage = (key) => {
@@ -104,6 +107,17 @@ function App() {
     }
   });
 
+  const [zoomSettings, setZoomSettings] = useState(() => {
+    const saved = readStorage(STORAGE_KEYS.zoomSettings);
+    if (!saved) return defaultZoomSettings;
+    try {
+      const parsed = JSON.parse(saved);
+      return { ...defaultZoomSettings, ...(parsed || {}) };
+    } catch {
+      return defaultZoomSettings;
+    }
+  });
+
   const persistTimerRef = useRef(0);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -152,6 +166,7 @@ function App() {
         localStorage.setItem(STORAGE_KEYS.name.current, projectName);
         localStorage.setItem(STORAGE_KEYS.rangePadding.current, JSON.stringify(rangePadding));
         localStorage.setItem(STORAGE_KEYS.fitSettings.current, JSON.stringify(fitSettings));
+        localStorage.setItem(STORAGE_KEYS.zoomSettings.current, JSON.stringify(zoomSettings));
       } catch {
         // ignore storage failures
       }
@@ -160,7 +175,7 @@ function App() {
     return () => {
       if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
     };
-  }, [tasks, vacations, projectName, rangePadding, fitSettings]);
+  }, [tasks, vacations, projectName, rangePadding, fitSettings, zoomSettings]);
 
   const openModal = (task = null) => {
     if (task) {
@@ -324,6 +339,13 @@ function App() {
       }
       return prev;
     });
+  };
+
+  const updateZoom = (value) => {
+    const next = Math.round(Number(value));
+    if (!Number.isFinite(next)) return;
+    const clamped = Math.max(25, Math.min(300, next));
+    setZoomSettings((prev) => ({ ...prev, [ganttViewMode]: clamped }));
   };
 
   const openImageExportModal = () => {
@@ -638,7 +660,7 @@ function App() {
   };
 
   const saveProjectFile = () => {
-    const data = { name: projectName, tasks, vacations, rangePadding, fitSettings };
+    const data = { name: projectName, tasks, vacations, rangePadding, fitSettings, zoomSettings };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
 
@@ -667,6 +689,7 @@ function App() {
             setVacations(normalizeVacations(parsed.vacations || []));
             setRangePadding(parsed.rangePadding || defaultRangePadding);
             setFitSettings({ ...defaultFitSettings, ...(parsed.fitSettings || {}) });
+            setZoomSettings({ ...defaultZoomSettings, ...(parsed.zoomSettings || {}) });
           }
         } else {
           alert('파일 형식 오류');
@@ -720,6 +743,8 @@ function App() {
             updatePadding={updatePadding}
             fitSettings={fitSettings}
             updateFit={updateFit}
+            zoomSettings={zoomSettings}
+            updateZoom={updateZoom}
             openImageExportModal={openImageExportModal}
             isImageExportModalOpen={isImageExportModalOpen}
             exportScope={exportScope}
@@ -731,6 +756,8 @@ function App() {
             <Dashboard tasks={tasks} projectName={projectName} />
           </div>
         );
+      case 'help':
+        return <Help />;
       default:
         return null;
     }
