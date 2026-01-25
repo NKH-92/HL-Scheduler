@@ -1,7 +1,15 @@
 import Modal from '../Modal';
 import { XIcon } from '../Icons';
+import { toUtcMidnightMs } from '../../utils/dates';
 
 function TaskEditModal({ isOpen, onClose, editingTask, formData, setFormData, onSave }) {
+  const startMs = toUtcMidnightMs(formData.start);
+  const endMs = toUtcMidnightMs(formData.end || formData.start);
+  const hasDateError = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs < startMs;
+  const hasRequiredError =
+    !String(formData.category || '').trim() || !String(formData.taskName || '').trim();
+  const hasFormError = hasDateError || hasRequiredError;
+
   return (
     <Modal
       isOpen={isOpen}
@@ -78,9 +86,17 @@ function TaskEditModal({ isOpen, onClose, editingTask, formData, setFormData, on
             type="date"
             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm"
             value={formData.end}
+            min={formData.start || undefined}
             onChange={(e) => setFormData({ ...formData, end: e.target.value })}
           />
         </div>
+
+        {(hasRequiredError || hasDateError) && (
+          <div className="col-span-2 text-xs text-rose-600 font-medium space-y-1">
+            {hasRequiredError && <div>구분과 업무명은 필수입니다.</div>}
+            {hasDateError && <div>종료일이 시작일보다 빠릅니다.</div>}
+          </div>
+        )}
 
         <div className="col-span-2 space-y-2">
           <div className="flex justify-between">
@@ -119,7 +135,8 @@ function TaskEditModal({ isOpen, onClose, editingTask, formData, setFormData, on
         </button>
         <button
           onClick={onSave}
-          className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all active:scale-95 text-sm"
+          disabled={hasFormError}
+          className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all active:scale-95 text-sm disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-indigo-600"
           type="button"
         >
           저장하기

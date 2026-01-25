@@ -2,13 +2,23 @@ import { useRef } from 'react';
 import TabButton from './TabButton';
 import { BarChart2, CalendarIcon, CheckSquare, Info, Layout, Save, Upload } from './Icons';
 
-function AppHeader({ activeTab, onTabChange, onSaveProject, onImportFile }) {
+function AppHeader({
+  activeTab,
+  onTabChange,
+  onSaveProject,
+  onImportFile,
+  showAppZoomControls = false,
+  appZoomPercent = 100,
+  onZoomIn,
+  onZoomOut,
+  onZoomReset,
+}) {
   const fileInputRef = useRef(null);
 
   return (
     <header className="sticky top-0 z-40 w-full transition-all duration-300">
       <div className="absolute inset-0 bg-white/80 backdrop-blur-md border-b border-slate-200/60 shadow-sm" />
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div className="relative w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-500/30">
             <Layout size={20} />
@@ -64,6 +74,37 @@ function AppHeader({ activeTab, onTabChange, onSaveProject, onImportFile }) {
         </div>
 
         <div className="flex items-center gap-2">
+          {showAppZoomControls && (
+            <div className="hidden sm:flex items-center gap-1 bg-slate-100/50 border border-slate-200/50 rounded-xl p-1">
+              <button
+                type="button"
+                onClick={onZoomOut}
+                className="w-8 h-8 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-white transition-colors font-bold leading-none"
+                title="화면 축소"
+                aria-label="화면 축소"
+              >
+                -
+              </button>
+              <button
+                type="button"
+                onClick={onZoomReset}
+                className="px-2 h-8 rounded-lg text-[11px] tabular-nums font-extrabold text-slate-600 hover:text-indigo-600 hover:bg-white transition-colors"
+                title="화면 크기 초기화"
+                aria-label="화면 크기 초기화"
+              >
+                {Math.round(Number(appZoomPercent) || 100)}%
+              </button>
+              <button
+                type="button"
+                onClick={onZoomIn}
+                className="w-8 h-8 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-white transition-colors font-bold leading-none"
+                title="화면 확대"
+                aria-label="화면 확대"
+              >
+                +
+              </button>
+            </div>
+          )}
           <button
             onClick={onSaveProject}
             className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"

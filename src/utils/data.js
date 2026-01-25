@@ -1,4 +1,4 @@
-import { formatDate, toDate } from './dates';
+import { formatDate, toDate, toUtcMidnightMs } from './dates.js';
 
 export const generateId = () => {
   const cryptoObj = globalThis.crypto;
@@ -35,6 +35,16 @@ export const normalizeTasks = (arr) => {
 
     const start = normalizeYmd(startRaw);
     const end = normalizeYmd(endRaw);
+    let normalizedStart = start;
+    let normalizedEnd = end;
+    if (start && end) {
+      const startMs = toUtcMidnightMs(start);
+      const endMs = toUtcMidnightMs(end);
+      if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs < startMs) {
+        normalizedStart = end;
+        normalizedEnd = start;
+      }
+    }
 
     let id = t.id != null ? String(t.id) : generateId();
     while (seen.has(id)) id = generateId();
@@ -46,8 +56,8 @@ export const normalizeTasks = (arr) => {
       taskName: t.taskName || '',
       department: t.department || '',
       assignee: t.assignee || '',
-      start,
-      end,
+      start: normalizedStart,
+      end: normalizedEnd,
       progress: clampProgress(t.progress),
       memo: String(t.memo ?? t.note ?? ''),
     };
@@ -65,11 +75,24 @@ export const normalizeVacations = (arr) => {
       while (seen.has(id)) id = generateId();
       seen.add(id);
 
+      const start = normalizeYmd(v.start || v.startDate || '');
+      const end = normalizeYmd(v.end || v.endDate || v.start || v.startDate || '');
+      let normalizedStart = start;
+      let normalizedEnd = end;
+      if (start && end) {
+        const startMs = toUtcMidnightMs(start);
+        const endMs = toUtcMidnightMs(end);
+        if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs < startMs) {
+          normalizedStart = end;
+          normalizedEnd = start;
+        }
+      }
+
       return {
         id,
         title: v.title || v.name || '휴가',
-        start: normalizeYmd(v.start || v.startDate || ''),
-        end: normalizeYmd(v.end || v.endDate || v.start || v.startDate || ''),
+        start: normalizedStart,
+        end: normalizedEnd,
       };
     })
     .filter((v) => v.start);
@@ -82,9 +105,9 @@ export const defaultRangePadding = {
 };
 
 export const defaultFitSettings = {
-  Day: { enabled: false, pages: 1 },
-  Week: { enabled: false, pages: 1 },
-  Month: { enabled: false, pages: 1 },
+  Day: { enabled: false },
+  Week: { enabled: false },
+  Month: { enabled: false },
 };
 
 export const defaultZoomSettings = {

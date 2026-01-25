@@ -8,11 +8,15 @@ function ReportModal({
   tasks,
   vacations,
   rangePadding,
+  reportChartWidth,
+  reportLeftPaneWidth,
   reportGanttMode,
   setReportGanttMode,
   generateWordReport,
   isGenerating,
 }) {
+  const exportChartWidth = Number(reportChartWidth) || 0;
+  const exportLeftPaneWidth = Number(reportLeftPaneWidth) || 0;
   return (
     <Modal
       isOpen={isOpen}
@@ -23,7 +27,9 @@ function ReportModal({
       <div className="bg-white px-6 py-4 border-b border-slate-100 flex justify-between items-center">
         <div>
           <h3 className="text-lg font-bold text-slate-800">보고서 내보내기</h3>
-          <p className="text-xs text-slate-500 mt-1">Gantt 미리보기와 Word 보고서를 생성합니다.</p>
+          <p className="text-xs text-slate-500 mt-1">
+            전체 프로젝트 기준으로 Gantt 미리보기와 Word 보고서를 생성합니다. 1~2는 세로, 3은 가로로 출력되며 이미지는 IMG 출력 형식을 사용합니다.
+          </p>
         </div>
         <button
           onClick={onClose}
@@ -64,7 +70,11 @@ function ReportModal({
               vacations={vacations}
               viewMode={reportGanttMode}
               rangePadding={rangePadding[reportGanttMode] || { before: 0, after: 0 }}
+              fitEnabled={exportChartWidth > 0}
               isExportMode
+              exportId="gantt-report-preview"
+              exportViewportWidth={exportChartWidth}
+              exportLeftPaneWidth={exportLeftPaneWidth}
             />
           </div>
         </div>

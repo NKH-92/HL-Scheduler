@@ -87,7 +87,7 @@ function Dashboard({ tasks, projectName }) {
         </div>
 
         <div className="bg-white p-8 rounded-3xl shadow-lg border border-slate-100 flex flex-col h-[400px]">
-          <h3 className="text-lg font-bold text-slate-800 mb-6">최근 업무 현황</h3>
+          <h3 className="text-lg font-bold text-slate-800 mb-6">업무 현황</h3>
           <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-3">
             {tasks.map((task) => (
               <div

@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "gen:icons": "node scripts/gen-icons.mjs",
-    "dist:portable": "npm run build && npm run gen:icons && electron-builder --win portable"
+    "test": "node --experimental-specifier-resolution=node scripts/sanity-check.mjs",
+    "dist:portable": "npm run build && npm run gen:icons && electron-builder --win portable && node scripts/copy-portable-to-dist.cjs"
   },
   "dependencies": {
     "html-to-image": "^1.11.11",
@@ -41,7 +42,7 @@
       "package.json"
     ],
     "win": {
-      "icon": "electron/icon.png",
+      "icon": "electron/icon.ico",
       "target": [
         {
           "target": "portable",

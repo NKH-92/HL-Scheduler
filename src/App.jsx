@@ -1,25 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import html2canvas from 'html2canvas';
-import { toJpeg, toPng } from 'html-to-image';
+import { getFontEmbedCSS, toJpeg, toPng } from 'html-to-image';
 import AppHeader from './components/AppHeader';
 import Dashboard from './components/Dashboard';
 import Help from './components/Help';
 import ScheduleView from './components/ScheduleView';
 import TaskManagement from './components/TaskManagement';
+import GanttChart from './components/GanttChart';
 import ImageExportModal from './components/modals/ImageExportModal';
 import ReportModal from './components/modals/ReportModal';
 import TaskEditModal from './components/modals/TaskEditModal';
-import {
-  INITIAL_TASKS,
-  generateId,
-  defaultFitSettings,
-  defaultRangePadding,
-  defaultZoomSettings,
-  newTaskTemplate,
-  normalizeTasks,
-  normalizeVacations,
-} from './utils/data';
+import { generateId, newTaskTemplate, normalizeTasks, normalizeVacations } from './utils/data';
 import { formatDate, toUtcMidnightMs } from './utils/dates';
+import { useSchedulerStorage } from './hooks/useSchedulerStorage';
+import {
+  GANTT_EXPORT_LEFT_PANE_PX,
+  REPORT_CHART_WIDTH_PX,
+  REPORT_IMAGE_PIXEL_RATIO,
+  REPORT_PAGE_WIDTH_PX,
+} from './utils/ganttLayout';
+import { mergeRangePadding, sanitizeFitSettings, sanitizeZoomSettings } from './utils/schedulerSettings';
+import { readStorage } from './utils/storage';
+import { STORAGE_KEYS } from './utils/storageKeys';
 
 const escapeHtml = (value) =>
   String(value ?? '')
@@ -34,94 +36,63 @@ const sanitizeFileName = (value, fallback) => {
   return base.replace(/[\\/:*?"<>|]/g, '_');
 };
 
-const STORAGE_KEYS = {
-  name: { current: 'hlSchedulerName', legacy: 'proSchedulerName' },
-  tasks: { current: 'hlSchedulerTasks', legacy: 'proSchedulerTasks' },
-  vacations: { current: 'hlSchedulerVacations', legacy: 'proSchedulerVacations' },
-  rangePadding: { current: 'hlSchedulerRangePadding', legacy: 'proSchedulerRangePadding' },
-  fitSettings: { current: 'hlSchedulerFitSettings', legacy: 'proSchedulerFitSettings' },
-  zoomSettings: { current: 'hlSchedulerZoomSettings', legacy: 'proSchedulerZoomSettings' },
+const countInvalidRanges = (items, getStart, getEnd) => {
+  if (!Array.isArray(items)) return 0;
+  let count = 0;
+  items.forEach((item) => {
+    const start = getStart(item);
+    if (!start) return;
+    const end = getEnd(item) || start;
+    const startMs = toUtcMidnightMs(start);
+    const endMs = toUtcMidnightMs(end);
+    if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs < startMs) count += 1;
+  });
+  return count;
 };
 
-const readStorage = (key) => {
-  try {
-    return localStorage.getItem(key.current) ?? localStorage.getItem(key.legacy);
-  } catch {
-    return null;
-  }
+const buildInvalidRangeNotice = (taskCount, vacationCount) => {
+  if (!taskCount && !vacationCount) return '';
+  const parts = [];
+  if (taskCount) parts.push(`업무 ${taskCount}건`);
+  if (vacationCount) parts.push(`휴가 ${vacationCount}건`);
+  return `\n\n종료일이 시작일보다 빠른 ${parts.join(', ')}은(는) 자동으로 교정됩니다.`;
 };
 
-const migrateLegacyStorage = () => {
-  try {
-    Object.values(STORAGE_KEYS).forEach((key) => {
-      if (localStorage.getItem(key.current) != null) return;
-      const legacyValue = localStorage.getItem(key.legacy);
-      if (legacyValue == null) return;
-      localStorage.setItem(key.current, legacyValue);
-    });
-  } catch {
-    // ignore storage failures (private mode, disabled storage, etc.)
-  }
+const clampAppZoomFactor = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  return Math.max(0.5, Math.min(2.5, Math.round(n * 100) / 100));
 };
 
 function App() {
   const [activeTab, setActiveTab] = useState('tasks');
+  const {
+    projectName,
+    setProjectName,
+    tasks,
+    setTasks,
+    vacations,
+    setVacations,
+    rangePadding,
+    setRangePadding,
+    fitSettings,
+    setFitSettings,
+    zoomSettings,
+    setZoomSettings,
+    storageError,
+  } = useSchedulerStorage();
 
-  const [projectName, setProjectName] = useState(() => readStorage(STORAGE_KEYS.name) || '');
-  const [tasks, setTasks] = useState(() => {
-    const saved = readStorage(STORAGE_KEYS.tasks);
-    if (!saved) return INITIAL_TASKS;
-    try {
-      return normalizeTasks(JSON.parse(saved));
-    } catch {
-      return INITIAL_TASKS;
-    }
-  });
-  const [vacations, setVacations] = useState(() => {
-    const saved = readStorage(STORAGE_KEYS.vacations);
-    if (!saved) return [];
-    try {
-      return normalizeVacations(JSON.parse(saved));
-    } catch {
-      return [];
-    }
-  });
-  const [rangePadding, setRangePadding] = useState(() => {
-    const saved = readStorage(STORAGE_KEYS.rangePadding);
-    if (!saved) return defaultRangePadding;
-    try {
-      const parsed = JSON.parse(saved);
-      return parsed || defaultRangePadding;
-    } catch {
-      return defaultRangePadding;
-    }
-  });
-  const [fitSettings, setFitSettings] = useState(() => {
-    const saved = readStorage(STORAGE_KEYS.fitSettings);
-    if (!saved) return defaultFitSettings;
-    try {
-      const parsed = JSON.parse(saved);
-      return { ...defaultFitSettings, ...(parsed || {}) };
-    } catch {
-      return defaultFitSettings;
-    }
+  const [appZoomFactor, setAppZoomFactor] = useState(() => {
+    const saved = readStorage(STORAGE_KEYS.appZoom);
+    if (saved == null) return 1;
+    return clampAppZoomFactor(saved);
   });
 
-  const [zoomSettings, setZoomSettings] = useState(() => {
-    const saved = readStorage(STORAGE_KEYS.zoomSettings);
-    if (!saved) return defaultZoomSettings;
-    try {
-      const parsed = JSON.parse(saved);
-      return { ...defaultZoomSettings, ...(parsed || {}) };
-    } catch {
-      return defaultZoomSettings;
-    }
-  });
-
-  const persistTimerRef = useRef(0);
+  const appZoomRef = useRef(appZoomFactor);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportTasks, setReportTasks] = useState(null);
   const [editingTask, setEditingTask] = useState(null);
   const [ganttViewMode, setGanttViewMode] = useState('Day');
   const [filterText, setFilterText] = useState('');
@@ -153,29 +124,48 @@ function App() {
     );
   }, [tasks, filterText]);
 
+  const reportSourceTasks = reportTasks ?? tasks;
+
   useEffect(() => {
-    migrateLegacyStorage();
+    appZoomRef.current = appZoomFactor;
+  }, [appZoomFactor]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.appZoom.current, String(appZoomFactor));
+    } catch {
+      // ignore storage failures
+    }
+  }, [appZoomFactor]);
+
+  useEffect(() => {
+    const hlSchedulerApi = globalThis.hlScheduler;
+    if (!hlSchedulerApi || typeof hlSchedulerApi.setZoomFactor !== 'function') return;
+    hlSchedulerApi.setZoomFactor(clampAppZoomFactor(appZoomFactor)).catch((error) => {
+      console.warn('Failed to apply app zoom factor', error);
+    });
+  }, [appZoomFactor]);
+
+  const hlSchedulerApi = globalThis.hlScheduler;
+  const isDesktopApp = !!hlSchedulerApi && typeof hlSchedulerApi.setZoomFactor === 'function';
+
+  const setNextAppZoom = (next) => {
+    setAppZoomFactor(clampAppZoomFactor(next));
+  };
+
+  const zoomInApp = () => setNextAppZoom(appZoomRef.current + 0.1);
+  const zoomOutApp = () => setNextAppZoom(appZoomRef.current - 0.1);
+  const resetAppZoom = () => setNextAppZoom(1);
+
+  const openReportModal = useCallback(() => {
+    setReportTasks(tasks);
+    setIsReportModalOpen(true);
+  }, [tasks]);
+
+  const closeReportModal = useCallback(() => {
+    setIsReportModalOpen(false);
+    setReportTasks(null);
   }, []);
-
-  useEffect(() => {
-    if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
-    persistTimerRef.current = window.setTimeout(() => {
-      try {
-        localStorage.setItem(STORAGE_KEYS.tasks.current, JSON.stringify(tasks));
-        localStorage.setItem(STORAGE_KEYS.vacations.current, JSON.stringify(vacations));
-        localStorage.setItem(STORAGE_KEYS.name.current, projectName);
-        localStorage.setItem(STORAGE_KEYS.rangePadding.current, JSON.stringify(rangePadding));
-        localStorage.setItem(STORAGE_KEYS.fitSettings.current, JSON.stringify(fitSettings));
-        localStorage.setItem(STORAGE_KEYS.zoomSettings.current, JSON.stringify(zoomSettings));
-      } catch {
-        // ignore storage failures
-      }
-    }, 400);
-
-    return () => {
-      if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
-    };
-  }, [tasks, vacations, projectName, rangePadding, fitSettings, zoomSettings]);
 
   const openModal = (task = null) => {
     if (task) {
@@ -200,6 +190,13 @@ function App() {
   const handleSave = () => {
     if (!String(formData.category || '').trim() || !String(formData.taskName || '').trim()) {
       alert('필수 입력(구분/업무명)이 누락되었습니다.');
+      return;
+    }
+
+    const startMs = toUtcMidnightMs(formData.start);
+    const endMs = toUtcMidnightMs(formData.end || formData.start);
+    if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs < startMs) {
+      alert('종료일이 시작일보다 빠릅니다.');
       return;
     }
 
@@ -327,17 +324,10 @@ function App() {
     setRangePadding((prev) => ({ ...prev, [ganttViewMode]: { ...(prev[ganttViewMode] || {}), [key]: v } }));
   };
 
-  const updateFit = (key, value) => {
+  const updateFit = (enabled) => {
     setFitSettings((prev) => {
-      const current = prev[ganttViewMode] || { enabled: false, pages: 1 };
-      if (key === 'pages') {
-        const pages = Math.max(1, Math.min(20, Number(value || 1)));
-        return { ...prev, [ganttViewMode]: { ...current, pages } };
-      }
-      if (key === 'enabled') {
-        return { ...prev, [ganttViewMode]: { ...current, enabled: !!value } };
-      }
-      return prev;
+      const current = prev[ganttViewMode] || { enabled: false };
+      return { ...prev, [ganttViewMode]: { ...current, enabled: !!enabled } };
     });
   };
 
@@ -374,16 +364,17 @@ function App() {
       const isFullExport = exportScope !== 'visible';
       const baseWidth = isFullExport ? el.scrollWidth : el.clientWidth;
       const baseHeight = isFullExport ? el.scrollHeight : el.clientHeight;
-      let pixelRatio = Math.max(1, Math.min(4, Number(exportScale || 3)));
+      let pixelRatio = Number(exportScale || 3);
+      if (!Number.isFinite(pixelRatio) || pixelRatio <= 0) pixelRatio = 1;
+      pixelRatio = Math.min(4, pixelRatio);
 
       const maxCanvasSize = 16384;
-      const maxDim = Math.max(baseWidth * pixelRatio, baseHeight * pixelRatio);
-      if (Number.isFinite(maxDim) && maxDim > maxCanvasSize) {
-        const limitedRatio = maxCanvasSize / Math.max(1, Math.max(baseWidth, baseHeight));
-        const nextRatio = Math.max(1, Math.floor(Math.min(pixelRatio, limitedRatio) * 100) / 100);
-        if (nextRatio < pixelRatio) {
-          console.warn('Export size too large; reducing pixelRatio', { from: pixelRatio, to: nextRatio });
-          pixelRatio = nextRatio;
+      const maxBaseDim = Math.max(baseWidth, baseHeight);
+      if (Number.isFinite(maxBaseDim) && maxBaseDim > 0) {
+        const maxAllowedRatio = maxCanvasSize / maxBaseDim;
+        if (Number.isFinite(maxAllowedRatio) && maxAllowedRatio > 0 && maxAllowedRatio < pixelRatio) {
+          console.warn('Export size too large; reducing pixelRatio', { from: pixelRatio, to: maxAllowedRatio });
+          pixelRatio = maxAllowedRatio;
         }
       }
       const ext = exportFormat === 'jpg' ? 'jpg' : 'png';
@@ -399,22 +390,32 @@ function App() {
       };
 
       let dataUrl;
+      let fontEmbedCSS;
       try {
-        const baseOptions = { backgroundColor: '#ffffff', pixelRatio, cacheBust: true, filter };
-        const options = isFullExport ? { ...baseOptions, width: el.scrollWidth, height: el.scrollHeight } : baseOptions;
-        dataUrl = exportFormat === 'jpg' ? await toJpeg(el, { ...options, quality }) : await toPng(el, options);
-      } catch (primaryError) {
-        console.warn('html-to-image export failed; falling back to html2canvas', primaryError);
+        fontEmbedCSS = await getFontEmbedCSS(el, { cacheBust: true });
+      } catch (error) {
+        console.warn('Failed to embed fonts for export; falling back to system fonts', error);
+        fontEmbedCSS = undefined;
+      }
 
+      const captureWithHtmlToImage = async () => {
+        const baseOptions = { backgroundColor: '#ffffff', pixelRatio, cacheBust: true, filter, fontEmbedCSS };
+        const options = isFullExport
+          ? { ...baseOptions, width: el.scrollWidth, height: el.scrollHeight }
+          : { ...baseOptions, width: el.clientWidth, height: el.clientHeight };
+        return exportFormat === 'jpg' ? toJpeg(el, { ...options, quality }) : toPng(el, options);
+      };
+
+      const captureWithHtml2Canvas = async () => {
         const baseOptions = {
           scale: pixelRatio,
           useCORS: true,
           logging: false,
           backgroundColor: '#ffffff',
-          width: el.scrollWidth,
-          height: el.scrollHeight,
-          windowWidth: el.scrollWidth,
-          windowHeight: el.scrollHeight,
+          width: isFullExport ? el.scrollWidth : el.clientWidth,
+          height: isFullExport ? el.scrollHeight : el.clientHeight,
+          windowWidth: isFullExport ? el.scrollWidth : el.clientWidth,
+          windowHeight: isFullExport ? el.scrollHeight : el.clientHeight,
           ignoreElements: (element) => !exportShowToday && element?.dataset?.ganttToday === 'true',
           onclone: (clonedDoc) => {
             const style = clonedDoc.createElement('style');
@@ -437,16 +438,32 @@ function App() {
         const options = isFullExport ? { ...baseOptions, scrollX: 0, scrollY: 0 } : baseOptions;
         const canvas = await html2canvas(el, options);
         const mime = exportFormat === 'jpg' ? 'image/jpeg' : 'image/png';
-        dataUrl = canvas.toDataURL(mime, quality);
+        return canvas.toDataURL(mime, quality);
+      };
+
+      try {
+        dataUrl = await captureWithHtmlToImage();
+      } catch (primaryError) {
+        console.warn('html-to-image export failed; falling back to html2canvas', primaryError);
+        dataUrl = await captureWithHtml2Canvas();
       }
 
       const baseNameRaw =
         exportFileName || `${projectName || 'Project'}_Gantt_${ganttViewMode}_${formatDate(new Date())}`;
       const baseName = sanitizeFileName(baseNameRaw, 'gantt');
+      const downloadName = `${baseName}.${ext}`;
+
+      const schedulerApi = globalThis.hlScheduler;
+      if (schedulerApi && typeof schedulerApi.saveImage === 'function') {
+        const result = await schedulerApi.saveImage({ dataUrl, defaultFileName: downloadName, ext });
+        if (result && result.canceled) return;
+        setIsImageExportModalOpen(false);
+        return;
+      }
 
       const link = document.createElement('a');
       link.href = dataUrl;
-      link.download = `${baseName}.${ext}`;
+      link.download = downloadName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -460,39 +477,104 @@ function App() {
   const generateWordReport = async () => {
     setIsGenerating(true);
     try {
-      const ganttElement = document.getElementById('gantt-export-target');
+      const targetId = 'gantt-report-export-target';
+      const ganttElement = document.getElementById(targetId);
       if (!ganttElement) throw new Error('Chart not found');
 
       if (document.fonts?.ready) {
         await document.fonts.ready;
       }
       await new Promise((resolve) => requestAnimationFrame(resolve));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
 
-      const width = ganttElement.scrollWidth;
-      const height = ganttElement.scrollHeight;
-      const canvas = await html2canvas(ganttElement, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        width,
-        height,
-        windowWidth: width,
-        windowHeight: height,
-        scrollX: 0,
-        scrollY: 0,
-        onclone: (clonedDoc) => {
-          const style = clonedDoc.createElement('style');
-          style.textContent = `
-            * { animation: none !important; transition: none !important; }
-          `;
-          clonedDoc.head.appendChild(style);
-        },
-      });
+      const reportMaxWidthPx = REPORT_PAGE_WIDTH_PX;
+      const isFullExport = true;
+      const baseWidth = ganttElement.scrollWidth || 0;
+      const baseHeight = ganttElement.scrollHeight || 0;
+      const safeWidth = Math.max(1, baseWidth);
+      const safeHeight = Math.max(1, baseHeight);
 
-      const imgData = canvas.toDataURL('image/png');
-      const totalProgress = Math.round(tasks.reduce((acc, curr) => acc + curr.progress, 0) / (tasks.length || 1));
-      const completed = tasks.filter((t) => t.progress === 100).length;
+      const maxCanvasSize = 16384;
+      const maxBaseDim = Math.max(safeWidth, safeHeight);
+      let pixelRatio = REPORT_IMAGE_PIXEL_RATIO;
+      if (!Number.isFinite(pixelRatio) || pixelRatio <= 0) pixelRatio = 1;
+      pixelRatio = Math.min(4, pixelRatio);
+      if (Number.isFinite(maxBaseDim) && maxBaseDim > 0 && maxBaseDim * pixelRatio > maxCanvasSize) {
+        const nextRatio = maxCanvasSize / maxBaseDim;
+        if (Number.isFinite(nextRatio) && nextRatio > 0 && nextRatio < pixelRatio) {
+          console.warn('Report chart too large; reducing pixelRatio', { from: pixelRatio, to: nextRatio });
+          pixelRatio = nextRatio;
+        }
+      }
+
+      const showToday = true;
+      const filter = (node) => {
+        if (showToday) return true;
+        return !(node instanceof HTMLElement) || node.dataset?.ganttToday !== 'true';
+      };
+
+      let imgData;
+      let fontEmbedCSS;
+      try {
+        fontEmbedCSS = await getFontEmbedCSS(ganttElement, { cacheBust: true });
+      } catch (error) {
+        console.warn('Failed to embed fonts for report; falling back to system fonts', error);
+        fontEmbedCSS = undefined;
+      }
+
+      const captureWithHtmlToImage = async () => {
+        const baseOptions = { backgroundColor: '#ffffff', pixelRatio, cacheBust: true, filter, fontEmbedCSS };
+        const options = { ...baseOptions, width: safeWidth, height: safeHeight };
+        return toPng(ganttElement, options);
+      };
+
+      const captureWithHtml2Canvas = async () => {
+        const baseOptions = {
+          scale: pixelRatio,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff',
+          width: safeWidth,
+          height: safeHeight,
+          windowWidth: safeWidth,
+          windowHeight: safeHeight,
+          ignoreElements: (element) => !showToday && element?.dataset?.ganttToday === 'true',
+          onclone: (clonedDoc) => {
+            const style = clonedDoc.createElement('style');
+            style.textContent = `
+              * { animation: none !important; transition: none !important; }
+            `;
+            clonedDoc.head.appendChild(style);
+
+            if (!isFullExport) return;
+            const clonedTarget = clonedDoc.getElementById(targetId);
+            if (!clonedTarget) return;
+            const wrapper = clonedTarget.parentElement;
+            if (!wrapper) return;
+            wrapper.style.position = 'absolute';
+            wrapper.style.left = '0px';
+            wrapper.style.top = '0px';
+          },
+        };
+
+        const options = isFullExport ? { ...baseOptions, scrollX: 0, scrollY: 0 } : baseOptions;
+        const canvas = await html2canvas(ganttElement, options);
+        return canvas.toDataURL('image/png');
+      };
+
+      try {
+        imgData = await captureWithHtmlToImage();
+      } catch (primaryError) {
+        console.warn('html-to-image report capture failed; falling back to html2canvas', primaryError);
+        imgData = await captureWithHtml2Canvas();
+      }
+
+      const reportImageWidthPx = Math.min(reportMaxWidthPx, safeWidth);
+      const reportImageHeightPx = Math.max(1, Math.round((reportImageWidthPx / safeWidth) * safeHeight));
+      const totalProgress = Math.round(
+        reportSourceTasks.reduce((acc, curr) => acc + curr.progress, 0) / (reportSourceTasks.length || 1),
+      );
+      const completed = reportSourceTasks.filter((t) => t.progress === 100).length;
       const reportTitle = escapeHtml(projectName) || '무제 프로젝트';
 
       const reportHtml = `
@@ -511,15 +593,20 @@ function App() {
             .stat{font-size:11pt;margin-bottom:5px}
             .img-container{text-align:center;margin-top:20px}
             img{max-width:100%;height:auto;border:1px solid #cbd5e1}
+            @page Section1{size:8.27in 11.69in;margin:0.7in;mso-page-orientation:portrait}
+            @page Section2{size:11.69in 8.27in;margin:0.6in;mso-page-orientation:landscape}
+            div.Section1{page:Section1}
+            div.Section2{page:Section2}
           </style>
         </head>
         <body>
+          <div class="Section1">
           <h1>${reportTitle} 진행상황보고서</h1>
           <h2>1. 프로젝트 요약</h2>
           <div class="summary-box">
             <p class="stat"><strong>생성일</strong> ${formatDate(new Date())}</p>
             <p class="stat"><strong>전체 진행률</strong> ${totalProgress}%</p>
-            <p class="stat"><strong>총 업무 수</strong> ${tasks.length}개(완료: ${completed}개)</p>
+            <p class="stat"><strong>총 업무 수</strong> ${reportSourceTasks.length}개(완료: ${completed}개)</p>
           </div>
           <h2>2. 상세 업무 현황</h2>
           <table>
@@ -534,7 +621,7 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              ${tasks
+              ${reportSourceTasks
                 .map((t) => {
                   const category = escapeHtml(t.category);
                   const taskName = escapeHtml(t.taskName);
@@ -548,9 +635,20 @@ function App() {
                 .join('')}
             </tbody>
           </table>
+          </div>
+          <br clear="all" style="page-break-before:always;mso-break-type:section-break;">
+          <div class="Section2">
           <h2>3. 일정 흐름 (Gantt Chart - ${escapeHtml(reportGanttMode)} View)</h2>
-          <div class="img-container"><img src="${imgData}" /></div>
+          <div class="img-container" style="width:${reportImageWidthPx}px;margin:0 auto;">
+            <img
+              src="${imgData}"
+              width="${reportImageWidthPx}"
+              height="${reportImageHeightPx}"
+              style="width:${reportImageWidthPx}px;height:${reportImageHeightPx}px;"
+            />
+          </div>
           <br /><br />
+          </div>
         </body>
         </html>`;
 
@@ -563,7 +661,7 @@ function App() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      setIsReportModalOpen(false);
+      closeReportModal();
     } catch (error) {
       console.error(error);
       alert('보고서 생성 중 오류가 발생했습니다.');
@@ -572,11 +670,13 @@ function App() {
     }
   };
 
-  const exportProjectXlsx = async () => {
+  const exportProjectXlsx = async (taskList = tasks) => {
     try {
       const xlsxModule = await import('xlsx');
       const XLSX = xlsxModule.default ?? xlsxModule;
       if (!XLSX?.utils?.book_new) throw new Error('xlsx module not available');
+
+      const safeTasks = Array.isArray(taskList) ? taskList : tasks;
 
       const toDurationDays = (start, end) => {
         const s = toUtcMidnightMs(start);
@@ -591,7 +691,7 @@ function App() {
 
       const tasksSheet = XLSX.utils.aoa_to_sheet([
         ['Category', 'Task Name', 'Department', 'Assignee', 'Start', 'End', 'Duration(days)', 'Progress(%)', 'Memo'],
-        ...tasks.map((t) => [
+        ...safeTasks.map((t) => [
           t.category || '',
           t.taskName || '',
           t.department || '',
@@ -626,13 +726,16 @@ function App() {
       vacationsSheet['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, vacationsSheet, 'Vacations');
 
-      const completed = tasks.filter((t) => t.progress === 100).length;
-      const totalProgress = tasks.length === 0 ? 0 : Math.round(tasks.reduce((acc, curr) => acc + curr.progress, 0) / tasks.length);
+      const completed = safeTasks.filter((t) => t.progress === 100).length;
+      const totalProgress =
+        safeTasks.length === 0
+          ? 0
+          : Math.round(safeTasks.reduce((acc, curr) => acc + curr.progress, 0) / safeTasks.length);
 
       const summarySheet = XLSX.utils.aoa_to_sheet([
         ['Project Name', safeProjectName],
         ['Exported At', today],
-        ['Total Tasks', tasks.length],
+        ['Total Tasks', safeTasks.length],
         ['Completed Tasks', completed],
         ['Total Progress(%)', totalProgress],
         ['Vacations', vacations.length],
@@ -681,15 +784,34 @@ function App() {
       try {
         const parsed = JSON.parse(evt.target.result);
         if (Array.isArray(parsed)) {
-          if (window.confirm('현재 데이터를 덮어쓰시겠습니까?')) setTasks(normalizeTasks(parsed));
+          const invalidTasks = countInvalidRanges(
+            parsed,
+            (t) => t?.start || t?.actStart || t?.planStart || '',
+            (t) => t?.end || t?.actEnd || t?.planEnd || '',
+          );
+          const invalidNotice = buildInvalidRangeNotice(invalidTasks, 0);
+          if (window.confirm(`현재 데이터를 덮어쓰시겠습니까?${invalidNotice}`)) {
+            setTasks(normalizeTasks(parsed));
+          }
         } else if (parsed.tasks) {
-          if (window.confirm(`'${parsed.name || '프로젝트'}' 프로젝트를 불러오시겠습니까?`)) {
+          const invalidTasks = countInvalidRanges(
+            parsed.tasks,
+            (t) => t?.start || t?.actStart || t?.planStart || '',
+            (t) => t?.end || t?.actEnd || t?.planEnd || '',
+          );
+          const invalidVacations = countInvalidRanges(
+            parsed.vacations,
+            (v) => v?.start || v?.startDate || '',
+            (v) => v?.end || v?.endDate || v?.start || v?.startDate || '',
+          );
+          const invalidNotice = buildInvalidRangeNotice(invalidTasks, invalidVacations);
+          if (window.confirm(`'${parsed.name || '프로젝트'}' 프로젝트를 불러오시겠습니까?${invalidNotice}`)) {
             setTasks(normalizeTasks(parsed.tasks));
             setProjectName(parsed.name || '');
             setVacations(normalizeVacations(parsed.vacations || []));
-            setRangePadding(parsed.rangePadding || defaultRangePadding);
-            setFitSettings({ ...defaultFitSettings, ...(parsed.fitSettings || {}) });
-            setZoomSettings({ ...defaultZoomSettings, ...(parsed.zoomSettings || {}) });
+            setRangePadding(mergeRangePadding(parsed.rangePadding));
+            setFitSettings(sanitizeFitSettings(parsed.fitSettings));
+            setZoomSettings(sanitizeZoomSettings(parsed.zoomSettings));
           }
         } else {
           alert('파일 형식 오류');
@@ -715,7 +837,7 @@ function App() {
               sortTasksByStart={sortTasksByStart}
               projectName={projectName}
               setProjectName={setProjectName}
-              openReportModal={() => setIsReportModalOpen(true)}
+              openReportModal={openReportModal}
               onExportXlsx={exportProjectXlsx}
               updateTaskMemo={updateTaskMemo}
             />
@@ -725,7 +847,6 @@ function App() {
         return (
           <ScheduleView
             projectName={projectName}
-            tasks={tasks}
             filteredTasks={filteredTasks}
             vacations={vacations}
             onTaskDateChange={updateTaskDates}
@@ -764,15 +885,31 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50/50 text-slate-800 font-sans selection:bg-indigo-100 selection:text-indigo-700">
+    <div className="min-h-screen flex flex-col bg-slate-50/50 text-slate-800 font-sans selection:bg-indigo-100 selection:text-indigo-700">
       <AppHeader
         activeTab={activeTab}
         onTabChange={setActiveTab}
         onSaveProject={saveProjectFile}
         onImportFile={handleFileImport}
+        showAppZoomControls={isDesktopApp}
+        appZoomPercent={Math.round(appZoomFactor * 100)}
+        onZoomIn={zoomInApp}
+        onZoomOut={zoomOutApp}
+        onZoomReset={resetAppZoom}
       />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-0">{renderContent()}</main>
+      <main className="flex-1 min-h-0 w-full px-4 sm:px-6 lg:px-8 py-6 relative z-0 flex flex-col">
+        {storageError && (
+          <div
+            className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
+            role="alert"
+          >
+            저장소 접근이 차단되어 변경사항이 저장되지 않습니다. 브라우저/앱 설정에서 저장소 허용 여부를
+            확인하세요.
+          </div>
+        )}
+        {renderContent()}
+      </main>
 
       <TaskEditModal
         isOpen={isModalOpen}
@@ -785,15 +922,33 @@ function App() {
 
       <ReportModal
         isOpen={isReportModalOpen}
-        onClose={() => setIsReportModalOpen(false)}
-        tasks={tasks}
+        onClose={closeReportModal}
+        tasks={reportSourceTasks}
         vacations={vacations}
         rangePadding={rangePadding}
+        reportChartWidth={REPORT_CHART_WIDTH_PX}
+        reportLeftPaneWidth={GANTT_EXPORT_LEFT_PANE_PX}
         reportGanttMode={reportGanttMode}
         setReportGanttMode={setReportGanttMode}
         generateWordReport={generateWordReport}
         isGenerating={isGenerating}
       />
+
+      {isReportModalOpen && (
+        <div style={{ position: 'fixed', left: '-9999px', top: '0px', pointerEvents: 'none' }}>
+          <GanttChart
+            tasks={reportSourceTasks}
+            vacations={vacations}
+            viewMode={reportGanttMode}
+            rangePadding={rangePadding[reportGanttMode] || { before: 0, after: 0 }}
+            fitEnabled
+            isExportMode
+            exportId="gantt-report-export-target"
+            exportViewportWidth={REPORT_CHART_WIDTH_PX}
+            exportLeftPaneWidth={GANTT_EXPORT_LEFT_PANE_PX}
+          />
+        </div>
+      )}
 
       <ImageExportModal
         isOpen={isImageExportModalOpen}

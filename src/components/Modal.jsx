@@ -22,6 +22,11 @@ function Modal({
 }) {
   const panelRef = useRef(null);
   const lastActiveRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -38,7 +43,7 @@ function Modal({
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onClose();
+        onCloseRef.current?.();
         return;
       }
 
@@ -59,7 +64,7 @@ function Modal({
           last.focus();
         }
       } else {
-        if (active === last) {
+        if (active === last || !panel.contains(active)) {
           e.preventDefault();
           first.focus();
         }
@@ -77,7 +82,7 @@ function Modal({
       const lastActive = lastActiveRef.current;
       if (lastActive && typeof lastActive.focus === 'function') lastActive.focus();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

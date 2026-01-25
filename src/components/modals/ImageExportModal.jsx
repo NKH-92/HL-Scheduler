@@ -60,7 +60,7 @@ function ImageExportModal({
             value={exportScope}
             onChange={(e) => setExportScope(e.target.value)}
           >
-            <option value="full">전체 차트(스크롤포함)</option>
+            <option value="full">전체 차트(스크롤 포함, 현재 필터)</option>
             <option value="visible">현재 화면(보이는 영역)</option>
           </select>
         </div>

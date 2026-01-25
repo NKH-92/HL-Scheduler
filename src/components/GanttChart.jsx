@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatDate, getDaysDiff, getKoreanDay, getWeekNumber, toDate, toUtcMidnightMs } from '../utils/dates';
+import { GANTT_EXPORT_LEFT_PANE_PX, GANTT_LEFT_PANE_PX } from '../utils/ganttLayout';
 
 function GanttChart({
   tasks,
@@ -7,10 +8,11 @@ function GanttChart({
   viewMode = 'Day',
   rangePadding = { before: 0, after: 0 },
   fitEnabled = false,
-  fitPages = 1,
   zoom = 1,
   isExportMode = false,
   exportId = 'gantt-export-target',
+  exportViewportWidth = 0,
+  exportLeftPaneWidth = 0,
   onTaskDateChange,
 }) {
   const { minDate, maxDate, totalDays } = useMemo(() => {
@@ -294,10 +296,10 @@ function GanttChart({
   }, [
     isExportMode,
     fitEnabled,
-    fitPages,
     viewMode,
     tasks.length,
     totalDays,
+    zoom,
     viewportRect.width,
     viewportRect.height,
   ]);
@@ -353,13 +355,18 @@ function GanttChart({
 
   const baseColWidth = config[viewMode].colWidth;
   const maxColWidth = baseColWidth * clampedZoom;
-  const pages = Math.max(1, Number(fitPages || 1));
-
   let colWidth = maxColWidth;
-  if (!isExportMode && fitEnabled && viewportRect.width > 0) {
-    colWidth = viewportRect.width / (Math.max(1, totalDays) * pages);
-    colWidth = Math.min(maxColWidth, Math.max(1, colWidth));
+  const fitViewportWidth = isExportMode ? Number(exportViewportWidth) : viewportRect.width;
+  if (fitEnabled && Number.isFinite(fitViewportWidth) && fitViewportWidth > 0) {
+    const fitColWidth = fitViewportWidth / Math.max(1, totalDays);
+    colWidth = Math.min(maxColWidth, fitColWidth);
   }
+
+  const leftPaneWidthPx = (() => {
+    const override = Number(exportLeftPaneWidth);
+    if (Number.isFinite(override) && override > 0) return override;
+    return isExportMode ? GANTT_EXPORT_LEFT_PANE_PX : GANTT_LEFT_PANE_PX;
+  })();
 
   const chartWidth = totalDays * colWidth;
 
@@ -727,7 +734,8 @@ function GanttChart({
       <div className={`flex flex-1 ${isExportMode ? 'overflow-visible' : 'overflow-hidden'}`}>
         <div
           ref={leftPaneRef}
-          className={`${isExportMode ? 'w-80' : 'w-64'} border-r border-indigo-100 bg-white flex flex-col z-10 shadow-[4px_0_10px_-3px_rgba(0,0,0,0.05)]`}
+          className="border-r border-indigo-100 bg-white flex flex-col z-10 shadow-[4px_0_10px_-3px_rgba(0,0,0,0.05)]"
+          style={{ width: `${leftPaneWidthPx}px` }}
         >
           <div className="h-[68px] border-b border-indigo-100 bg-white flex items-center px-5 font-bold text-xs text-slate-400 uppercase tracking-wider">
             Task &amp; Assignee
@@ -738,28 +746,47 @@ function GanttChart({
               {visibleTasks.map((task) => (
                 <div
                   key={task.id}
-                  className={`${isExportMode ? 'h-14 py-1' : 'h-14 items-center'} border-b border-slate-50 px-5 flex text-sm transition-colors ${isExportMode ? '' : 'hover:bg-slate-50'}`}
+                  className={`${isExportMode ? 'h-14' : 'h-14 items-center'} border-b border-slate-50 px-5 flex text-sm transition-colors ${isExportMode ? '' : 'hover:bg-slate-50'}`}
                 >
-                  <div className="flex flex-col w-full overflow-hidden justify-center h-full">
-                    <div className="flex justify-between items-center">
+                  <div className="flex flex-col w-full min-w-0 justify-center h-full">
+                    <div className="flex justify-between items-center min-w-0">
                       <span
+                        title={task.taskName || ''}
                         className={`text-slate-700 font-semibold ${
-                          isExportMode ? 'text-[12px] leading-snug whitespace-normal break-words' : 'truncate text-[13px]'
+                          isExportMode
+                            ? 'text-[12px] leading-snug whitespace-normal break-words'
+                            : 'min-w-0 truncate text-[13px] leading-tight'
                         }`}
                       >
                         {task.taskName}
                       </span>
                     </div>
-                    <div className="flex justify-between items-center mt-1">
+                    <div className={`flex justify-between items-center min-w-0 ${isExportMode ? 'mt-0.5' : 'mt-1'}`}>
                       <span
+                        title={task.department || ''}
                         className={`text-[11px] text-slate-400 ${
-                          isExportMode ? 'whitespace-normal break-words' : 'truncate max-w-[100px]'
+                          isExportMode
+                            ? 'min-w-0 flex-1 pr-2 whitespace-normal break-words leading-snug'
+                            : 'min-w-0 truncate max-w-[100px] leading-tight'
                         }`}
                       >
                         {task.department}
                       </span>
                       {task.assignee && (
-                        <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                        <span
+                          title={task.assignee || ''}
+                          className={`text-[10px] font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100 ${
+                            isExportMode ? 'mr-0.5' : ''
+                          }`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            lineHeight: 1,
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
+                          }}
+                        >
                           {task.assignee}
                         </span>
                       )}
