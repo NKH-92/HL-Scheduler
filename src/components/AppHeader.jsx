@@ -84,35 +84,32 @@ function AppHeader({
             </div>
 
             <div className="flex items-center gap-2">
-              {isAuthenticated ? (
-                <>
-                  <div className="hidden max-w-[320px] rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs sm:block">
-                    <div className="truncate font-semibold text-slate-700">{authEmail || '로그인 사용자'}</div>
-                    {authProfile && (
-                      <div className="truncate text-[11px] text-slate-500">
-                        {`${authProfile.name || '-'} / ${authProfile.department || '-'} / ${authProfile.position || '-'}`}
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onSignOut?.()}
-                    disabled={isAuthBusy}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    로그아웃
-                  </button>
-                </>
-              ) : (
+              <div className="flex w-[84px] items-center justify-end gap-2">
                 <button
+                  onClick={onSaveProject}
+                  className={`rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-700 ${
+                    isEditMode ? '' : 'pointer-events-none invisible'
+                  }`}
+                  title="프로젝트 백업(JSON)"
                   type="button"
-                  onClick={() => onOpenAuthModal?.()}
-                  disabled={isAuthBusy}
-                  className="rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  aria-hidden={!isEditMode}
+                  tabIndex={isEditMode ? 0 : -1}
                 >
-                  로그인
+                  <Save size={18} />
                 </button>
-              )}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-700 ${
+                    isEditMode ? '' : 'pointer-events-none invisible'
+                  }`}
+                  title="프로젝트 불러오기(JSON)"
+                  type="button"
+                  aria-hidden={!isEditMode}
+                  tabIndex={isEditMode ? 0 : -1}
+                >
+                  <Download size={18} />
+                </button>
+              </div>
 
               {showAppZoomControls && (
                 <div className="hidden items-center gap-1 rounded-xl border border-slate-200 bg-white/70 p-1 sm:flex">
@@ -146,32 +143,35 @@ function AppHeader({
                 </div>
               )}
 
-              <div className="flex w-[84px] items-center justify-end gap-2">
+              {isAuthenticated ? (
+                <>
+                  <div className="hidden max-w-[320px] rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs sm:block">
+                    <div className="truncate font-semibold text-slate-700">{authEmail || '로그인 사용자'}</div>
+                    {authProfile && (
+                      <div className="truncate text-[11px] text-slate-500">
+                        {`${authProfile.name || '-'} / ${authProfile.department || '-'} / ${authProfile.position || '-'}`}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onSignOut?.()}
+                    disabled={isAuthBusy}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    로그아웃
+                  </button>
+                </>
+              ) : (
                 <button
-                  onClick={onSaveProject}
-                  className={`rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-700 ${
-                    isEditMode ? '' : 'pointer-events-none invisible'
-                  }`}
-                  title="프로젝트 백업(JSON)"
                   type="button"
-                  aria-hidden={!isEditMode}
-                  tabIndex={isEditMode ? 0 : -1}
+                  onClick={() => onOpenAuthModal?.()}
+                  disabled={isAuthBusy}
+                  className="rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <Save size={18} />
+                  로그인
                 </button>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-700 ${
-                    isEditMode ? '' : 'pointer-events-none invisible'
-                  }`}
-                  title="프로젝트 불러오기(JSON)"
-                  type="button"
-                  aria-hidden={!isEditMode}
-                  tabIndex={isEditMode ? 0 : -1}
-                >
-                  <Download size={18} />
-                </button>
-              </div>
+              )}
 
               <input type="file" ref={fileInputRef} onChange={onImportFile} className="hidden" accept=".json" />
             </div>
