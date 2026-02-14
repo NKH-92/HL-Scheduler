@@ -1540,7 +1540,7 @@ function App() {
   }, [isUploadingPublicSchedule]);
 
   const uploadCurrentProject = useCallback(
-    async ({ title, mode = 'create', folderId, targetId, notificationRecipients, editorEmail } = {}) => {
+    async ({ title, mode = 'create', folderId, targetId, notificationRecipients } = {}) => {
       try {
         if (!isAuthenticated) {
           setIsAuthModalOpen(true);
@@ -1563,15 +1563,6 @@ function App() {
         const safeTitle = String(title || '').trim();
         if (!safeTitle) {
           void alertAsync('업로드 제목을 입력해주세요.');
-          return;
-        }
-
-        const safeSelectedEditorEmail = String(editorEmail || '').trim().toLowerCase();
-        const safeAuthEmail = String(authUser?.email || '').trim().toLowerCase();
-        if (safeSelectedEditorEmail && safeAuthEmail && safeSelectedEditorEmail !== safeAuthEmail) {
-          void alertAsync(
-            `선택한 수정자(${safeSelectedEditorEmail})와 현재 로그인 계정(${safeAuthEmail})이 다릅니다.\n동일한 계정으로 선택 후 다시 시도해주세요.`,
-          );
           return;
         }
 
@@ -1779,7 +1770,6 @@ function App() {
       publicFolderOptions,
       alertAsync,
       isAuthenticated,
-      authUser?.email,
       canEditSchedules,
       canWritePublicSchedules,
       isSharedScheduleLocked,
