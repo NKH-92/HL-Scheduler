@@ -30,7 +30,10 @@ import { readStorage } from './utils/storage';
 import { STORAGE_KEYS } from './utils/storageKeys';
 import {
   PUBLIC_UNCATEGORIZED_FOLDER_ID,
+  getAdminAppUrl,
   getSharedScheduleId,
+  getPublicAppUrl,
+  getSchedulerAppRole,
   getPublicSchedule,
   isPublicSchedulesEnabled,
   isPublicSchedulesWriteEnabled,
@@ -359,6 +362,9 @@ function App() {
 
   const hlSchedulerApi = globalThis.hlScheduler;
   const isDesktopApp = !!hlSchedulerApi && typeof hlSchedulerApi.setZoomFactor === 'function';
+  const appRole = useMemo(() => getSchedulerAppRole(), []);
+  const publicAppUrl = useMemo(() => getPublicAppUrl(), []);
+  const adminAppUrl = useMemo(() => getAdminAppUrl(), []);
   const sharedScheduleId = useMemo(() => getSharedScheduleId(), []);
   const isSharedScheduleLocked = !!sharedScheduleId;
   const canEditSchedules = isAuthenticated && permissions.canEditSchedules;
@@ -1425,17 +1431,27 @@ function App() {
   const routeByUserRole = useCallback(
     (user) => {
       const safeIsAdmin = !!user?.isAdmin;
+      const isAdminApp = appRole === 'admin';
 
       if (safeIsAdmin) {
+        if (!isAdminApp && adminAppUrl) {
+          window.location.href = adminAppUrl;
+          return;
+        }
         skipNextEditAutoResetRef.current = true;
         resetProjectState();
+        return;
+      }
+
+      if (isAdminApp && publicAppUrl) {
+        window.location.href = publicAppUrl;
         return;
       }
 
       setActiveMainTab('browse');
       setActiveEditorTab('tasks');
     },
-    [resetProjectState],
+    [appRole, adminAppUrl, publicAppUrl, resetProjectState],
   );
 
   useEffect(() => {

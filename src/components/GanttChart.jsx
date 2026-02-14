@@ -83,6 +83,8 @@ function GanttChart({
   }));
   const dragInfoRef = useRef(null);
   const dragCleanupRef = useRef(null);
+  const dragPreviewRafRef = useRef(0);
+  const dragPreviewPendingRef = useRef(null);
   const [dragPreview, setDragPreview] = useState(null);
 
   const HEADER_HEIGHT_PX = 68;
@@ -93,8 +95,34 @@ function GanttChart({
   useEffect(() => {
     return () => {
       if (dragCleanupRef.current) dragCleanupRef.current();
+      if (dragPreviewRafRef.current) cancelAnimationFrame(dragPreviewRafRef.current);
     };
   }, []);
+
+  const flushDragPreview = () => {
+    dragPreviewRafRef.current = 0;
+    const nextPreview = dragPreviewPendingRef.current;
+    dragPreviewPendingRef.current = null;
+    if (!nextPreview) return;
+    setDragPreview((prev) => {
+      if (
+        prev &&
+        prev.taskId === nextPreview.taskId &&
+        prev.mode === nextPreview.mode &&
+        prev.start === nextPreview.start &&
+        prev.end === nextPreview.end
+      ) {
+        return prev;
+      }
+      return nextPreview;
+    });
+  };
+
+  const scheduleDragPreview = (nextPreview) => {
+    dragPreviewPendingRef.current = nextPreview;
+    if (dragPreviewRafRef.current) return;
+    dragPreviewRafRef.current = requestAnimationFrame(flushDragPreview);
+  };
 
   const shiftDate = (date, deltaDays) => {
     const next = new Date(date);
@@ -180,18 +208,7 @@ function GanttChart({
       info.latestStartYmd = nextStartYmd;
       info.latestEndYmd = nextEndYmd;
 
-      setDragPreview((prev) => {
-        if (
-          prev &&
-          prev.taskId === info.taskId &&
-          prev.mode === info.mode &&
-          prev.start === nextStartYmd &&
-          prev.end === nextEndYmd
-        ) {
-          return prev;
-        }
-        return { taskId: info.taskId, mode: info.mode, start: nextStartYmd, end: nextEndYmd };
-      });
+      scheduleDragPreview({ taskId: info.taskId, mode: info.mode, start: nextStartYmd, end: nextEndYmd });
     };
 
     const finishDrag = () => {
@@ -206,6 +223,11 @@ function GanttChart({
       if (dragCleanupRef.current) dragCleanupRef.current();
       dragCleanupRef.current = null;
       dragInfoRef.current = null;
+      dragPreviewPendingRef.current = null;
+      if (dragPreviewRafRef.current) {
+        cancelAnimationFrame(dragPreviewRafRef.current);
+        dragPreviewRafRef.current = 0;
+      }
       setDragPreview(null);
     };
 

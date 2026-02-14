@@ -1,7 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
   getAuthMe,
-  getPublicSchedulesAuthToken,
   loginAuthUser,
   logoutAuthSession,
   registerAuthUser,
@@ -57,12 +56,6 @@ export function AuthProvider({ children }) {
   }, []);
 
   const refreshSession = useCallback(async () => {
-    const token = getPublicSchedulesAuthToken();
-    if (!token) {
-      clearAuthState();
-      return { authenticated: false, user: null };
-    }
-
     try {
       const data = await getAuthMe();
       if (!data?.authenticated) {
@@ -103,8 +96,7 @@ export function AuthProvider({ children }) {
     async ({ email, password }) => {
       const data = await loginAuthUser({ email, password });
       const token = String(data?.token || '').trim();
-      if (!token) throw new Error('로그인 토큰을 받지 못했습니다.');
-      setPublicSchedulesAuthToken(token);
+      if (token) setPublicSchedulesAuthToken(token);
 
       const user = normalizeUser(data.user);
       const nextPermissions = normalizePermissions(data.permissions);

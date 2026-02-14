@@ -54,15 +54,34 @@ jobs:
           VITE_PUBLIC_SCHEDULES_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
           VITE_PUBLIC_SCHEDULES_WRITE_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
           VITE_AUTH_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_ADMIN_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
+          VITE_ADMIN_API_BASE: https://hl-scheduler-admin-api.skarhkdgus7.workers.dev
           VITE_PUBLIC_APP_URL: https://hl-scheduler-public.pages.dev
-          VITE_ADMIN_APP_URL: https://hl-scheduler-public.pages.dev
+          VITE_ADMIN_APP_URL: https://hl-scheduler-admin.pages.dev
           VITE_SHARED_SCHEDULE_ID: ""
         run: npm run build
 
-      - name: Deploy pages
+      - name: Deploy public pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy dist --project-name hl-scheduler-public --branch main
+
+      - name: Build admin web app
+        env:
+          VITE_APP_ROLE: admin
+          VITE_PUBLIC_SCHEDULES_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
+          VITE_PUBLIC_SCHEDULES_WRITE_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
+          VITE_AUTH_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
+          VITE_ADMIN_API_BASE: https://hl-scheduler-admin-api.skarhkdgus7.workers.dev
+          VITE_PUBLIC_APP_URL: https://hl-scheduler-public.pages.dev
+          VITE_ADMIN_APP_URL: https://hl-scheduler-admin.pages.dev
+          VITE_SHARED_SCHEDULE_ID: ""
+        run: npm run build
+
+      - name: Deploy admin pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name hl-scheduler-admin --branch main

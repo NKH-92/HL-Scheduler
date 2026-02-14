@@ -36,25 +36,11 @@ export const isAuthApiEnabled = () => Boolean(getAuthApiBase());
 export const isAdminApiEnabled = () => Boolean(getAdminApiBase());
 
 let authToken = '';
-if (typeof window !== 'undefined') {
-  try {
-    authToken = String(window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '').trim();
-  } catch {
-    // ignore storage access failures
-  }
-}
 
 export const getPublicSchedulesAuthToken = () => String(authToken || '').trim();
 
-export const setPublicSchedulesAuthToken = (token, { persist = true } = {}) => {
+export const setPublicSchedulesAuthToken = (token) => {
   authToken = String(token || '').trim();
-  if (!persist || typeof window === 'undefined') return;
-  try {
-    if (authToken) window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, authToken);
-    else window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-  } catch {
-    // ignore storage access failures
-  }
 };
 
 class PublicSchedulesApiError extends Error {
@@ -115,6 +101,7 @@ const requestJson = async (
 ) => {
   const method = String(options.method || 'GET').toUpperCase();
   const isWriteRequest = api === 'write' || api === 'admin' || (method !== 'GET' && method !== 'HEAD');
+  const needsCredentials = api === 'auth' || api === 'admin' || isWriteRequest;
   const token = getPublicSchedulesAuthToken();
 
   const controller = new AbortController();
@@ -130,7 +117,7 @@ const requestJson = async (
 
     const res = await fetch(buildApiUrl(path, { api }), {
       ...options,
-      credentials: options.credentials ?? (api === 'admin' || isWriteRequest ? 'include' : 'same-origin'),
+      credentials: options.credentials ?? (needsCredentials ? 'include' : 'same-origin'),
       headers,
       signal: controller.signal,
     });
@@ -277,7 +264,7 @@ export const createPublicFolder = async ({ name, parentId = null } = {}) => {
 
   const data = await requestJson('/api/folders', {
     method: 'POST',
-    api: 'write',
+    api: 'admin',
     requiresAuth: true,
     body: JSON.stringify({
       name: safeName,
@@ -297,7 +284,7 @@ export const deletePublicFolder = async (folderId) => {
 
   const data = await requestJson(`/api/folders/${safeId}`, {
     method: 'DELETE',
-    api: 'write',
+    api: 'admin',
     requiresAuth: true,
   });
 
@@ -313,7 +300,7 @@ export const updatePublicScheduleFolder = async (id, folderId) => {
 
   const data = await requestJson(`/api/schedules/${safeId}/folder`, {
     method: 'PATCH',
-    api: 'write',
+    api: 'admin',
     requiresAuth: true,
     body: JSON.stringify({
       folderId: normalizeFolderIdForPayload(folderId),

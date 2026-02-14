@@ -11,12 +11,20 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_LENGTH = 128;
 const PBKDF2_ITERATIONS = 100000;
+const PBKDF2_MIN_ITERATIONS = 1000;
+const PBKDF2_MAX_ITERATIONS = 100000;
 const PBKDF2_KEY_LENGTH_BITS = 256;
+const SESSION_COOKIE_NAME_DEFAULT = 'hl_scheduler_session';
+const SESSION_COOKIE_PATH = '/';
+const DEFAULT_AUTH_RATE_LIMIT_WINDOW_SECONDS = 300;
+const DEFAULT_AUTH_RATE_LIMIT_MAX_ATTEMPTS = 10;
 
 const STATUS_PENDING = 'pending';
 const STATUS_APPROVED = 'approved';
 const STATUS_REJECTED = 'rejected';
 const STATUS_DISABLED = 'disabled';
+
+let runtimeSchemaReadyPromise = null;
 
 const parseBoolean = (value, fallback = false) => {
   if (value == null) return fallback;
@@ -261,19 +269,67 @@ const hashPassword = async (password, env) => {
 const verifyPassword = async (password, encoded, env) => {
   const raw = String(encoded || '').trim();
   const [algorithm, iterationsRaw, saltHex, hashHex] = raw.split('$');
-  if (algorithm !== 'pbkdf2_sha256' || !iterationsRaw || !saltHex || !hashHex) return false;
+  if (algorithm !== 'pbkdf2_sha256' || !iterationsRaw || !saltHex || !hashHex) {
+    return { ok: false, reason: 'invalid_hash' };
+  }
 
-  const iterations = Math.max(1000, Number(iterationsRaw) || PBKDF2_ITERATIONS);
+  const parsedIterations = Number(iterationsRaw);
+  if (!Number.isFinite(parsedIterations) || parsedIterations < PBKDF2_MIN_ITERATIONS) {
+    return { ok: false, reason: 'invalid_hash' };
+  }
+  if (parsedIterations > PBKDF2_MAX_ITERATIONS) {
+    return { ok: false, reason: 'iterations_not_supported' };
+  }
+
+  const iterations = clamp(Math.trunc(parsedIterations), PBKDF2_MIN_ITERATIONS, PBKDF2_MAX_ITERATIONS);
   const saltBytes = hexToBytes(saltHex);
-  if (!saltBytes) return false;
+  if (!saltBytes) return { ok: false, reason: 'invalid_hash' };
 
   const pepper = getPasswordPepper(env);
-  const derived = await derivePbkdf2Hex(`${String(password)}${pepper}`, saltBytes, iterations);
-  return derived === String(hashHex).toLowerCase();
+  try {
+    const derived = await derivePbkdf2Hex(`${String(password)}${pepper}`, saltBytes, iterations);
+    return { ok: derived === String(hashHex).toLowerCase(), reason: 'ok' };
+  } catch (error) {
+    return { ok: false, reason: 'derive_failed', details: String(error?.message || error) };
+  }
 };
 
 const getSessionTtlHours = (env) => clamp(toInt(env.SESSION_TTL_HOURS, 12), 1, 168);
 const getSessionTtlMs = (env) => getSessionTtlHours(env) * 60 * 60 * 1000;
+const getSessionCookieName = (env) => String(env.SESSION_COOKIE_NAME || SESSION_COOKIE_NAME_DEFAULT).trim() || SESSION_COOKIE_NAME_DEFAULT;
+const getSessionCookieSameSite = (env) => {
+  const value = String(env.SESSION_COOKIE_SAME_SITE || 'None').trim().toLowerCase();
+  if (value === 'lax') return 'Lax';
+  if (value === 'strict') return 'Strict';
+  return 'None';
+};
+
+const buildSessionCookie = (token, env) => {
+  const name = getSessionCookieName(env);
+  const ttlSeconds = Math.max(60, Math.floor(getSessionTtlMs(env) / 1000));
+  const sameSite = getSessionCookieSameSite(env);
+  return [
+    `${name}=${encodeURIComponent(String(token || '').trim())}`,
+    `Max-Age=${ttlSeconds}`,
+    `Path=${SESSION_COOKIE_PATH}`,
+    'HttpOnly',
+    'Secure',
+    `SameSite=${sameSite}`,
+  ].join('; ');
+};
+
+const buildSessionCookieClear = (env) => {
+  const name = getSessionCookieName(env);
+  const sameSite = getSessionCookieSameSite(env);
+  return [
+    `${name}=`,
+    'Max-Age=0',
+    `Path=${SESSION_COOKIE_PATH}`,
+    'HttpOnly',
+    'Secure',
+    `SameSite=${sameSite}`,
+  ].join('; ');
+};
 
 const parseBearerToken = (request) => {
   const authHeader = String(request.headers.get('authorization') || '').trim();
@@ -281,6 +337,38 @@ const parseBearerToken = (request) => {
   if (!match) return '';
   return String(match[1] || '').trim();
 };
+
+const parseCookieMap = (request) => {
+  const header = String(request.headers.get('cookie') || '').trim();
+  if (!header) return new Map();
+  const map = new Map();
+  header.split(';').forEach((part) => {
+    const segment = String(part || '').trim();
+    if (!segment) return;
+    const idx = segment.indexOf('=');
+    if (idx <= 0) return;
+    const key = segment.slice(0, idx).trim();
+    const value = segment.slice(idx + 1).trim();
+    if (!key) return;
+    try {
+      map.set(key, decodeURIComponent(value));
+    } catch {
+      map.set(key, value);
+    }
+  });
+  return map;
+};
+
+const parseSessionToken = (request, env) => {
+  const bearer = parseBearerToken(request);
+  if (bearer) return bearer;
+  const cookieName = getSessionCookieName(env);
+  const cookies = parseCookieMap(request);
+  return String(cookies.get(cookieName) || '').trim();
+};
+
+const isAdminSurfaceEnabled = (env) =>
+  parseBoolean(env.ENABLE_ADMIN_ENDPOINTS, parseBoolean(env.REQUIRE_ACCESS_EMAIL, false));
 
 const isAllowedEmailDomain = (email, env) => {
   const expected = String(env.ALLOWED_FROM_DOMAIN || '').trim().toLowerCase();
@@ -355,7 +443,7 @@ const getUserById = async (env, id) => {
 };
 
 const getSessionUser = async (request, env) => {
-  const token = parseBearerToken(request);
+  const token = parseSessionToken(request, env);
   if (!token) return null;
   const tokenHash = await sha256Hex(token);
   const now = nowMs();
@@ -445,11 +533,6 @@ const buildPlainText = ({ projectName, updatedByEmail, updatedAt }) =>
     'Regards.',
   ].join('\n');
 
-const isAccessGateEnabled = (env) => {
-  if (parseBoolean(env.REQUIRE_ACCESS_EMAIL, false)) return true;
-  return normalizeEmailList(env.ALLOWED_ADMIN_EMAILS).length > 0;
-};
-
 const ensureNotReadOnly = (env) => {
   if (parseBoolean(env.READ_ONLY_MODE, false)) {
     return errorResponse('This API is in read-only mode.', { status: 403 });
@@ -457,49 +540,202 @@ const ensureNotReadOnly = (env) => {
   return null;
 };
 
-const ensureWriteGuard = (request, env) => {
-  if (parseBoolean(env.READ_ONLY_MODE, false)) {
-    return errorResponse('This API is in read-only mode.', { status: 403 });
-  }
-
-  const requireAccessEmail = parseBoolean(env.REQUIRE_ACCESS_EMAIL, false);
-  const allowedAdmins = new Set(normalizeEmailList(env.ALLOWED_ADMIN_EMAILS));
-  const accessEmail = normalizeEmail(request.headers.get('CF-Access-Authenticated-User-Email'));
-  const mustValidateAccess = requireAccessEmail || allowedAdmins.size > 0;
-
-  if (mustValidateAccess) {
-    if (!accessEmail || !isValidEmail(accessEmail)) {
-      return errorResponse('Cloudflare Access authentication is required.', { status: 401 });
-    }
-    if (allowedAdmins.size > 0 && !allowedAdmins.has(accessEmail)) {
-      return errorResponse('Authenticated user is not allowed to perform this action.', { status: 403 });
-    }
-  }
-
-  return null;
-};
-
-const ensureLegacyUploadKeyIfNeeded = (request, env) => {
-  const configured = String(env.UPLOAD_KEY || '').trim();
-  if (!configured) return null;
-  if (isAccessGateEnabled(env)) return null;
-  const provided = String(request.headers.get('X-Upload-Key') || '').trim();
-  if (provided && provided === configured) return null;
-  return errorResponse('Invalid upload key.', { status: 401 });
-};
-
-const ensureFolderAdminKeyIfConfigured = (request, env) => {
-  const configured = String(env.FOLDER_ADMIN_KEY || '').trim();
-  if (!configured) return null;
-  const provided = String(request.headers.get('X-Folder-Admin-Key') || '').trim();
-  if (provided && provided === configured) return null;
-  return errorResponse('Invalid folder admin key.', { status: 401 });
-};
-
 const ensureFolderExists = async (db, folderId) => {
   if (folderId == null) return true;
   const row = await db.prepare('SELECT id FROM folders WHERE id = ?').bind(folderId).first();
   return !!row;
+};
+
+const ensureRuntimeSchema = async (env) => {
+  if (runtimeSchemaReadyPromise) return runtimeSchemaReadyPromise;
+
+  runtimeSchemaReadyPromise = (async () => {
+    await env.DB
+      .prepare(
+        [
+          'CREATE TABLE IF NOT EXISTS schedules (',
+          'id TEXT PRIMARY KEY,',
+          'name TEXT NOT NULL,',
+          'data TEXT NOT NULL,',
+          'tasks_count INTEGER NOT NULL DEFAULT 0,',
+          'vacations_count INTEGER NOT NULL DEFAULT 0,',
+          'folder_id TEXT,',
+          'created_by_email TEXT,',
+          'updated_by_email TEXT,',
+          'created_at INTEGER NOT NULL,',
+          'updated_at INTEGER NOT NULL',
+          ')',
+        ].join(' '),
+      )
+      .run();
+
+    const alterStatements = [
+      'ALTER TABLE schedules ADD COLUMN folder_id TEXT',
+      'ALTER TABLE schedules ADD COLUMN created_by_email TEXT',
+      'ALTER TABLE schedules ADD COLUMN updated_by_email TEXT',
+    ];
+
+    for (const sql of alterStatements) {
+      try {
+        await env.DB.prepare(sql).run();
+      } catch (error) {
+        const message = String(error?.message || '').toLowerCase();
+        const isDuplicateColumn = message.includes('duplicate column name');
+        if (!isDuplicateColumn) throw error;
+      }
+    }
+
+    await env.DB
+      .prepare(
+        [
+          'CREATE TABLE IF NOT EXISTS folders (',
+          'id TEXT PRIMARY KEY,',
+          'name TEXT NOT NULL,',
+          'parent_id TEXT,',
+          'depth INTEGER NOT NULL,',
+          'sort_order INTEGER NOT NULL DEFAULT 0,',
+          'created_at INTEGER NOT NULL,',
+          'updated_at INTEGER NOT NULL,',
+          'UNIQUE(parent_id, name)',
+          ')',
+        ].join(' '),
+      )
+      .run();
+    await env.DB.prepare('CREATE INDEX IF NOT EXISTS folders_parent_id ON folders(parent_id)').run();
+    await env.DB.prepare('CREATE INDEX IF NOT EXISTS folders_sort_order ON folders(sort_order)').run();
+    await env.DB.prepare('CREATE INDEX IF NOT EXISTS schedules_folder_id ON schedules(folder_id)').run();
+    await env.DB.prepare('CREATE INDEX IF NOT EXISTS schedules_updated_by_email_idx ON schedules(updated_by_email)').run();
+
+    await env.DB
+      .prepare(
+        [
+          'CREATE TABLE IF NOT EXISTS users (',
+          'id TEXT PRIMARY KEY,',
+          'email TEXT NOT NULL UNIQUE,',
+          'password_hash TEXT NOT NULL,',
+          'status TEXT NOT NULL,',
+          'requested_at INTEGER NOT NULL,',
+          'approved_at INTEGER,',
+          'approved_by_email TEXT,',
+          'last_login_at INTEGER,',
+          'created_at INTEGER NOT NULL,',
+          'updated_at INTEGER NOT NULL',
+          ')',
+        ].join(' '),
+      )
+      .run();
+    await env.DB.prepare('CREATE INDEX IF NOT EXISTS users_status_idx ON users(status)').run();
+    await env.DB.prepare('CREATE INDEX IF NOT EXISTS users_email_idx ON users(email)').run();
+
+    await env.DB
+      .prepare(
+        [
+          'CREATE TABLE IF NOT EXISTS auth_sessions (',
+          'id TEXT PRIMARY KEY,',
+          'user_id TEXT NOT NULL,',
+          'token_hash TEXT NOT NULL UNIQUE,',
+          'expires_at INTEGER NOT NULL,',
+          'created_at INTEGER NOT NULL,',
+          'revoked_at INTEGER',
+          ')',
+        ].join(' '),
+      )
+      .run();
+    await env.DB.prepare('CREATE INDEX IF NOT EXISTS auth_sessions_user_id_idx ON auth_sessions(user_id)').run();
+    await env.DB.prepare('CREATE INDEX IF NOT EXISTS auth_sessions_expires_at_idx ON auth_sessions(expires_at)').run();
+
+    await env.DB
+      .prepare(
+        [
+          'CREATE TABLE IF NOT EXISTS auth_rate_limits (',
+          'key TEXT PRIMARY KEY,',
+          'attempt_count INTEGER NOT NULL,',
+          'window_started_at INTEGER NOT NULL,',
+          'updated_at INTEGER NOT NULL',
+          ')',
+        ].join(' '),
+      )
+      .run();
+    await env.DB.prepare('CREATE INDEX IF NOT EXISTS auth_rate_limits_updated_idx ON auth_rate_limits(updated_at)').run();
+  })().catch((error) => {
+    runtimeSchemaReadyPromise = null;
+    throw error;
+  });
+
+  return runtimeSchemaReadyPromise;
+};
+
+const getClientIp = (request) => {
+  const cfIp = String(request.headers.get('CF-Connecting-IP') || '').trim();
+  if (cfIp) return cfIp;
+  const xff = String(request.headers.get('X-Forwarded-For') || '').trim();
+  if (!xff) return '';
+  const first = xff.split(',')[0];
+  return String(first || '').trim();
+};
+
+const getAuthRateLimitWindowMs = (env) =>
+  clamp(toInt(env.AUTH_RATE_LIMIT_WINDOW_SECONDS, DEFAULT_AUTH_RATE_LIMIT_WINDOW_SECONDS), 30, 3600) * 1000;
+const getAuthRateLimitMaxAttempts = (env) =>
+  clamp(toInt(env.AUTH_RATE_LIMIT_MAX_ATTEMPTS, DEFAULT_AUTH_RATE_LIMIT_MAX_ATTEMPTS), 3, 100);
+
+const consumeAuthRateLimit = async (request, env, { scope, email = '' } = {}) => {
+  const keyScope = String(scope || 'auth').trim().toLowerCase() || 'auth';
+  const keyEmail = normalizeEmail(email);
+  const ip = getClientIp(request);
+  const key = `${keyScope}:${keyEmail || '-'}:${ip || '-'}`;
+  const now = nowMs();
+  const windowMs = getAuthRateLimitWindowMs(env);
+  const maxAttempts = getAuthRateLimitMaxAttempts(env);
+
+  const row = await env.DB
+    .prepare('SELECT attempt_count, window_started_at FROM auth_rate_limits WHERE key = ? LIMIT 1')
+    .bind(key)
+    .first();
+
+  const currentCount = Number(row?.attempt_count || 0);
+  const windowStartedAt = Number(row?.window_started_at || 0);
+  const withinWindow = Number.isFinite(windowStartedAt) && now - windowStartedAt < windowMs;
+
+  if (!withinWindow) {
+    await env.DB
+      .prepare(
+        [
+          'INSERT INTO auth_rate_limits (key, attempt_count, window_started_at, updated_at)',
+          'VALUES (?, 1, ?, ?)',
+          'ON CONFLICT(key) DO UPDATE SET attempt_count = 1, window_started_at = excluded.window_started_at, updated_at = excluded.updated_at',
+        ].join(' '),
+      )
+      .bind(key, now, now)
+      .run();
+    return { limited: false, retryAfterSeconds: 0 };
+  }
+
+  if (currentCount >= maxAttempts) {
+    const remainingMs = Math.max(0, windowMs - (now - windowStartedAt));
+    return { limited: true, retryAfterSeconds: Math.max(1, Math.ceil(remainingMs / 1000)) };
+  }
+
+  await env.DB
+    .prepare('UPDATE auth_rate_limits SET attempt_count = ?, updated_at = ? WHERE key = ?')
+    .bind(currentCount + 1, now, key)
+    .run();
+
+  // Lightweight cleanup to avoid unbounded growth.
+  if (Math.random() < 0.02) {
+    const threshold = now - windowMs * 4;
+    await env.DB.prepare('DELETE FROM auth_rate_limits WHERE updated_at < ?').bind(threshold).run();
+  }
+
+  return { limited: false, retryAfterSeconds: 0 };
+};
+
+const clearAuthRateLimit = async (request, env, { scope, email = '' } = {}) => {
+  const keyScope = String(scope || 'auth').trim().toLowerCase() || 'auth';
+  const keyEmail = normalizeEmail(email);
+  const ip = getClientIp(request);
+  const key = `${keyScope}:${keyEmail || '-'}:${ip || '-'}`;
+  await env.DB.prepare('DELETE FROM auth_rate_limits WHERE key = ?').bind(key).run();
 };
 
 const listFoldersFlat = async (db) => {
@@ -786,6 +1022,14 @@ const handleRegisterAuth = async (request, env) => {
   const email = normalizeEmail(bodyResult.payload.email);
   const password = String(bodyResult.payload.password || '');
 
+  const rateLimit = await consumeAuthRateLimit(request, env, { scope: 'register', email });
+  if (rateLimit.limited) {
+    return errorResponse('Too many register attempts. Please try again later.', {
+      status: 429,
+      details: { retryAfterSeconds: rateLimit.retryAfterSeconds },
+    });
+  }
+
   if (!email || !isValidEmail(email)) {
     return errorResponse('email is required and must be a valid email.', { status: 400 });
   }
@@ -848,6 +1092,14 @@ const handleLoginAuth = async (request, env) => {
   const email = normalizeEmail(bodyResult.payload.email);
   const password = String(bodyResult.payload.password || '');
 
+  const rateLimit = await consumeAuthRateLimit(request, env, { scope: 'login', email });
+  if (rateLimit.limited) {
+    return errorResponse('Too many login attempts. Please try again later.', {
+      status: 429,
+      details: { retryAfterSeconds: rateLimit.retryAfterSeconds },
+    });
+  }
+
   if (!email || !isValidEmail(email)) {
     return errorResponse('email is required and must be a valid email.', { status: 400 });
   }
@@ -858,8 +1110,22 @@ const handleLoginAuth = async (request, env) => {
   const rawUser = await env.DB.prepare('SELECT * FROM users WHERE email = ? LIMIT 1').bind(email).first();
   if (!rawUser) return errorResponse('Invalid email or password.', { status: 401 });
 
-  const isMatched = await verifyPassword(password, rawUser.password_hash, env);
-  if (!isMatched) return errorResponse('Invalid email or password.', { status: 401 });
+  const verifyResult = await verifyPassword(password, rawUser.password_hash, env);
+  if (!verifyResult.ok) {
+    if (verifyResult.reason === 'iterations_not_supported') {
+      return errorResponse('This account password must be reset by admin before login.', {
+        status: 403,
+        details: { code: 'password_reset_required' },
+      });
+    }
+    if (verifyResult.reason === 'derive_failed') {
+      return errorResponse('Password verification failed. Please contact admin for password reset.', {
+        status: 403,
+        details: { code: 'password_verify_failed' },
+      });
+    }
+    return errorResponse('Invalid email or password.', { status: 401 });
+  }
 
   const user = mapUserRow(rawUser, env);
   if (user.status !== STATUS_APPROVED) {
@@ -870,12 +1136,17 @@ const handleLoginAuth = async (request, env) => {
   const now = nowMs();
   await env.DB.prepare('UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?').bind(now, now, user.id).run();
   const latestUser = await getUserById(env, user.id);
+  await clearAuthRateLimit(request, env, { scope: 'login', email });
 
   return jsonResponse({
     token: session.token,
     expiresAt: session.expiresAt,
     user: mapUserPublic(latestUser),
     permissions: buildUserPermissions(latestUser),
+  }, {
+    headers: {
+      'Set-Cookie': buildSessionCookie(session.token, env),
+    },
   });
 };
 
@@ -893,20 +1164,22 @@ const handleAuthMe = async (request, env) => {
 };
 
 const handleAuthLogout = async (request, env) => {
-  const token = parseBearerToken(request);
-  if (!token) return jsonResponse({ ok: true });
-  const tokenHash = await sha256Hex(token);
-  const now = nowMs();
+  const token = parseSessionToken(request, env);
+  if (token) {
+    const tokenHash = await sha256Hex(token);
+    const now = nowMs();
 
-  await env.DB
-    .prepare('UPDATE auth_sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL')
-    .bind(now, tokenHash)
-    .run();
+    await env.DB
+      .prepare('UPDATE auth_sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL')
+      .bind(now, tokenHash)
+      .run();
+  }
 
-  return jsonResponse({ ok: true });
+  return jsonResponse({ ok: true }, { headers: { 'Set-Cookie': buildSessionCookieClear(env) } });
 };
 
 const handleAdminListUsers = async (request, env) => {
+  if (!isAdminSurfaceEnabled(env)) return errorResponse('Not found.', { status: 404 });
   const auth = await ensureAdminUser(request, env);
   if (auth.error) return auth.error;
 
@@ -941,6 +1214,7 @@ const handleAdminListUsers = async (request, env) => {
 };
 
 const updateUserStatus = async (request, env, userId, nextStatus) => {
+  if (!isAdminSurfaceEnabled(env)) return errorResponse('Not found.', { status: 404 });
   const auth = await ensureAdminUser(request, env);
   if (auth.error) return auth.error;
 
@@ -970,6 +1244,7 @@ const handleAdminApproveUser = async (request, env, userId) => updateUserStatus(
 const handleAdminRejectUser = async (request, env, userId) => updateUserStatus(request, env, userId, STATUS_REJECTED);
 
 const handleAdminResetPassword = async (request, env, userId) => {
+  if (!isAdminSurfaceEnabled(env)) return errorResponse('Not found.', { status: 404 });
   const auth = await ensureAdminUser(request, env);
   if (auth.error) return auth.error;
 
@@ -1294,6 +1569,7 @@ const handleUpdateSchedule = async (request, env, id) => {
 };
 
 const handlePatchScheduleFolder = async (request, env, id) => {
+  if (!isAdminSurfaceEnabled(env)) return errorResponse('Not found.', { status: 404 });
   const readOnlyError = ensureNotReadOnly(env);
   if (readOnlyError) return readOnlyError;
 
@@ -1375,6 +1651,7 @@ const handleListFoldersTree = async (env) => {
 };
 
 const handleCreateFolder = async (request, env) => {
+  if (!isAdminSurfaceEnabled(env)) return errorResponse('Not found.', { status: 404 });
   const readOnlyError = ensureNotReadOnly(env);
   if (readOnlyError) return readOnlyError;
 
@@ -1452,6 +1729,7 @@ const handleCreateFolder = async (request, env) => {
 };
 
 const handleDeleteFolder = async (request, env, folderId) => {
+  if (!isAdminSurfaceEnabled(env)) return errorResponse('Not found.', { status: 404 });
   const readOnlyError = ensureNotReadOnly(env);
   if (readOnlyError) return readOnlyError;
 
@@ -1484,6 +1762,7 @@ const handleRequest = async (request, env) => {
   const url = getRequestUrl(request);
   const method = String(request.method || 'GET').toUpperCase();
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
+  const adminSurfaceEnabled = isAdminSurfaceEnabled(env);
 
   if (method === 'OPTIONS') {
     return new Response(null, {
@@ -1518,6 +1797,10 @@ const handleRequest = async (request, env) => {
 
   if (method === 'POST' && pathname === '/api/auth/logout') {
     return handleAuthLogout(request, env);
+  }
+
+  if (pathname.startsWith('/api/admin/') && !adminSurfaceEnabled) {
+    return errorResponse('Not found.', { status: 404 });
   }
 
   if (method === 'GET' && pathname === '/api/admin/users') {
@@ -1607,6 +1890,7 @@ export default {
     }
 
     try {
+      await ensureRuntimeSchema(env);
       const response = await handleRequest(request, env);
       return withCorsHeaders(response, cors.headers);
     } catch (error) {

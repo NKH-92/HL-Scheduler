@@ -4,6 +4,11 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const normalizeText = (value) => String(value ?? '').trim();
 const normalizeEmail = (value) => normalizeText(value).toLowerCase();
+const normalizeHeader = (value) =>
+  normalizeText(value)
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[._-]/g, '');
 
 const splitCsvLine = (line) => {
   const result = [];
@@ -45,12 +50,27 @@ const parseEmployeeDirectory = (csvText) => {
 
   if (lines.length === 0) return [];
   const header = splitCsvLine(lines[0]);
+  const normalizedHeader = header.map((col) => normalizeHeader(col));
+  const findColumnIndex = (candidates, { contains = [] } = {}) => {
+    const normalizedCandidates = (Array.isArray(candidates) ? candidates : []).map((item) => normalizeHeader(item));
+    for (const candidate of normalizedCandidates) {
+      const idx = normalizedHeader.indexOf(candidate);
+      if (idx >= 0) return idx;
+    }
+
+    const normalizedContains = (Array.isArray(contains) ? contains : []).map((item) => normalizeHeader(item));
+    if (normalizedContains.length === 0) return -1;
+    return normalizedHeader.findIndex((col) => normalizedContains.some((keyword) => keyword && col.includes(keyword)));
+  };
+
   const columnIndex = {
-    name: header.findIndex((col) => col === '이름'),
-    department: header.findIndex((col) => col === '부서'),
-    position: header.findIndex((col) => col === '직위'),
-    email: header.findIndex((col) => col === 'e-메일주소'),
-    company: header.findIndex((col) => col === '회사'),
+    name: findColumnIndex(['이름', '성명', 'name'], { contains: ['이름', '성명', 'name'] }),
+    department: findColumnIndex(['부서', '팀', 'department'], { contains: ['부서', '팀', 'department'] }),
+    position: findColumnIndex(['직위', '직책', 'position', 'title'], { contains: ['직위', '직책', 'position', 'title'] }),
+    email: findColumnIndex(['e-메일주소', '이메일', '메일주소', 'email', 'e-mail'], {
+      contains: ['이메일', '메일', 'email', 'mail'],
+    }),
+    company: findColumnIndex(['회사', '법인', 'company'], { contains: ['회사', '법인', 'company'] }),
   };
 
   return lines
