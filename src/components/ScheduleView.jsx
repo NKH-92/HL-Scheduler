@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+﻿import { useEffect, useMemo, useRef } from 'react';
 import { getDaysDiff, toDate } from '../utils/dates';
 import GanttChart from './GanttChart';
 import { Save, Search, XIcon } from './Icons';
@@ -84,93 +84,83 @@ function ScheduleView({
   }, [ganttViewMode, isLongDayRange, shouldReenableFit, fitEnabled, updateFit]);
 
   return (
-    <div className="animate-fade-in flex flex-col gap-6 flex-1 min-h-0">
-      <div className="flex flex-col lg:flex-row gap-4 justify-between items-end">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Schedule</h2>
-          <p className="text-sm text-slate-500 mt-1">{projectName || '프로젝트'} 전체 일정을 관리합니다.</p>
-        </div>
-      </div>
+    <div className="animate-fade-in flex min-h-0 flex-1 flex-col gap-5">
+      <section className="glass-panel relative z-20 p-4 lg:p-5 pointer-events-auto">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">Timeline</h2>
+            <p className="mt-1 text-sm text-slate-500">{projectName || '프로젝트'} 일정 흐름을 관리하고 조정합니다.</p>
+          </div>
 
-      <div className="bg-white/80 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-slate-200/60 flex flex-col md:flex-row gap-4 items-center justify-between sticky top-20 z-10 transition-all">
-        <div className="flex items-center gap-3 w-full md:w-auto relative group">
-          <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors">
-            <Search size={18} />
-          </div>
-          <input
-            type="text"
-            placeholder="업무, 담당자, 부서 검색.."
-            className="bg-slate-50 border-none ring-1 ring-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm w-full md:w-72 focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all shadow-sm"
-            value={filterText}
-            onChange={(e) => setFilterText(e.target.value)}
-          />
-        </div>
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end lg:w-auto pointer-events-auto">
+            <label className="relative block w-full sm:w-72 pointer-events-auto">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <Search size={16} />
+              </span>
+              <input
+                type="text"
+                placeholder="작업명, 담당자, 부서 검색"
+                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                value={filterText}
+                onChange={(e) => setFilterText(e.target.value)}
+              />
+            </label>
 
-        <div className="flex items-center gap-6 text-xs font-medium text-slate-600">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500" />
-            </span>
-            오늘
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-emerald-500 shadow-sm shadow-emerald-200" />
-            완료
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-indigo-500 shadow-sm shadow-indigo-200" />
-            진행중
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600">
+              <span className="inline-flex h-2.5 w-2.5 rounded-full bg-rose-500" /> Today
+              <span className="inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" /> 진행
+              <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" /> 완료
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="bg-slate-50/50 px-6 py-3 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="font-semibold text-slate-700 text-sm">휴가 및 일정 예외</h3>
+      <section className="glass-panel relative z-10 overflow-hidden pointer-events-auto">
+        <div className="flex items-center justify-between border-b border-slate-200/70 px-5 py-3">
+          <h3 className="text-sm font-bold text-slate-800">휴가/예외 일정</h3>
           <button
             onClick={() => setIsVacationPanelOpen((prev) => !prev)}
-            className="text-xs text-indigo-600 font-medium hover:underline"
+            className="rounded-lg px-2 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
             type="button"
           >
-            {isVacationPanelOpen ? '닫기' : '열기'}
+            {isVacationPanelOpen ? '접기' : '펼치기'}
           </button>
         </div>
 
         {isVacationPanelOpen && (
-          <div className="p-6 transition-all">
-            <div className="flex flex-col md:flex-row gap-4 items-end">
-              <div className="flex-1 space-y-1">
-                <label className="text-xs font-bold text-slate-500 ml-1">명칭</label>
+          <div className="space-y-4 p-5">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.2fr_auto_auto_auto] lg:items-end">
+              <div>
+                <label className="field-label">제목</label>
                 <input
                   type="text"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="휴가 이름 입력"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="예: 여름 휴가, 점검 기간"
                   value={vacForm.title}
                   onChange={(e) => setVacForm({ ...vacForm, title: e.target.value })}
                 />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 ml-1">시작일</label>
+              <div>
+                <label className="field-label">시작일</label>
                 <input
                   type="date"
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-indigo-500"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                   value={vacForm.start}
                   onChange={(e) => setVacForm({ ...vacForm, start: e.target.value })}
                 />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 ml-1">종료일</label>
+              <div>
+                <label className="field-label">종료일</label>
                 <input
                   type="date"
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-indigo-500"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                   value={vacForm.end}
                   onChange={(e) => setVacForm({ ...vacForm, end: e.target.value })}
                 />
               </div>
               <button
                 onClick={addVacation}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md shadow-indigo-200 transition-all active:scale-95"
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
                 type="button"
               >
                 추가
@@ -178,20 +168,20 @@ function ScheduleView({
             </div>
 
             {vacations.length > 0 && (
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2">
                 {vacations.map((v) => (
                   <div
                     key={v.id}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-rose-50 text-rose-700 text-xs font-medium rounded-full border border-rose-100 shadow-sm"
+                    className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700"
                     title={`${v.title}: ${v.start} ~ ${v.end || v.start}`}
                   >
                     {v.title} ({v.start}
-                    {v.end && v.end !== v.start ? `~${v.end}` : ''})
+                    {v.end && v.end !== v.start ? ` ~ ${v.end}` : ''})
                     <button
                       onClick={() => deleteVacation(v.id)}
-                      className="hover:text-rose-900 bg-rose-200/50 rounded-full p-0.5"
+                      className="rounded-full bg-rose-100 p-0.5 transition hover:bg-rose-200"
                       type="button"
-                      aria-label="삭제"
+                      aria-label="휴가 삭제"
                     >
                       <XIcon size={12} />
                     </button>
@@ -201,17 +191,17 @@ function ScheduleView({
             )}
           </div>
         )}
-      </div>
+      </section>
 
-      <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200 flex flex-col flex-1 min-h-[420px] overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex flex-col lg:flex-row gap-4 justify-between items-center bg-white/50">
-          <div className="flex bg-slate-100 p-1 rounded-xl">
+      <section className="glass-panel relative z-0 flex min-h-[460px] min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-slate-200/70 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="inline-flex w-fit rounded-xl border border-slate-200 bg-slate-100 p-1">
             {['Day', 'Week', 'Month'].map((mode) => (
               <button
                 key={mode}
                 onClick={() => setGanttViewMode(mode)}
-                className={`px-5 py-1.5 text-xs font-bold rounded-lg transition-all duration-200 ${
-                  ganttViewMode === mode ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                className={`rounded-lg px-4 py-1.5 text-xs font-semibold transition ${
+                  ganttViewMode === mode ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
                 type="button"
               >
@@ -220,13 +210,13 @@ function ScheduleView({
             ))}
           </div>
 
-          <div className="flex items-center gap-3 text-xs">
-            <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
-              <span className="font-semibold text-slate-500">간격조절</span>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+              <span className="font-semibold text-slate-500">여백</span>
               <input
                 type="number"
                 min="0"
-                className="w-12 bg-white border border-slate-200 rounded px-1 text-center"
+                className="w-12 rounded border border-slate-200 bg-white px-1 text-center"
                 value={(rangePadding[ganttViewMode] || {}).before || 0}
                 onChange={(e) => updatePadding('before', e.target.value)}
               />
@@ -234,7 +224,7 @@ function ScheduleView({
               <input
                 type="number"
                 min="0"
-                className="w-12 bg-white border border-slate-200 rounded px-1 text-center"
+                className="w-12 rounded border border-slate-200 bg-white px-1 text-center"
                 value={(rangePadding[ganttViewMode] || {}).after || 0}
                 onChange={(e) => updatePadding('after', e.target.value)}
               />
@@ -242,31 +232,27 @@ function ScheduleView({
             </div>
 
             <label
-              className={`flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors ${
-                isLongDayRange ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-slate-100'
+              className={`inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 transition ${
+                isLongDayRange ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-slate-50'
               }`}
-              title={
-                isLongDayRange
-                  ? 'Day 보기에서 1년(365일) 이상일 때 성능 보호를 위해 화면 맞춤이 자동 해제됩니다.'
-                  : undefined
-              }
+              title={isLongDayRange ? 'Day 범위가 길어 자동으로 비활성화됩니다.' : undefined}
             >
               <input
                 type="checkbox"
-                className="accent-indigo-600"
+                className="accent-blue-600"
                 checked={effectiveFitEnabled}
                 disabled={isLongDayRange}
                 onChange={(e) => updateFit(e.target.checked)}
               />
-              <span className="font-semibold text-slate-600">화면맞춤</span>
+              <span className="font-semibold text-slate-600">화면 맞춤</span>
             </label>
 
-            <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
+            <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
               <span className="font-semibold text-slate-500">Zoom</span>
               <button
                 type="button"
                 onClick={() => updateZoom(zoomValue - 10)}
-                className="w-6 h-6 rounded bg-white border border-slate-200 text-slate-600 font-bold leading-none hover:bg-slate-50"
+                className="h-6 w-6 rounded border border-slate-200 bg-white font-bold text-slate-600 hover:bg-slate-50"
                 aria-label="Zoom out"
               >
                 -
@@ -278,12 +264,12 @@ function ScheduleView({
                 step="5"
                 value={zoomValue}
                 onChange={(e) => updateZoom(e.target.value)}
-                className="w-28 accent-indigo-600"
+                className="w-28 accent-blue-600"
               />
               <button
                 type="button"
                 onClick={() => updateZoom(zoomValue + 10)}
-                className="w-6 h-6 rounded bg-white border border-slate-200 text-slate-600 font-bold leading-none hover:bg-slate-50"
+                className="h-6 w-6 rounded border border-slate-200 bg-white font-bold text-slate-600 hover:bg-slate-50"
                 aria-label="Zoom in"
               >
                 +
@@ -291,8 +277,8 @@ function ScheduleView({
               <button
                 type="button"
                 onClick={() => updateZoom(100)}
-                className="px-2 h-6 rounded bg-white border border-slate-200 text-slate-500 font-bold text-[10px] hover:bg-slate-50 tabular-nums"
-                title="Reset zoom"
+                className="h-6 rounded border border-slate-200 bg-white px-2 text-[10px] font-bold tabular-nums text-slate-500 hover:bg-slate-50"
+                title="Zoom 초기화"
               >
                 {zoomValue}%
               </button>
@@ -300,41 +286,24 @@ function ScheduleView({
 
             <button
               onClick={openImageExportModal}
-              className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-1.5 rounded-lg font-bold shadow-sm shadow-emerald-200 transition-all flex items-center gap-1"
+              className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
               type="button"
-              title="이미지 저장"
+              title="이미지 내보내기"
             >
-              <Save size={14} /> IMG
+              <Save size={13} /> 이미지
             </button>
           </div>
         </div>
 
         {isLongDayRange && (
-          <div className="px-6 py-3 border-b border-sky-100 bg-sky-50/70 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <p className="text-xs text-sky-800 font-medium">
-              안내: 현재 전체 기간이 Day 보기에서 1년(365일) 이상이면 성능 보호를 위해{' '}
-              <span className="font-semibold">화면 맞춤이 자동 해제</span>됩니다. 필요하면 Week/Month로 전환하세요.
+          <div className="border-b border-sky-100 bg-sky-50/80 px-5 py-3">
+            <p className="text-xs font-medium text-sky-800">
+              Day 보기 범위가 365일을 넘어 화면 맞춤이 자동 비활성화되었습니다. 필요하면 Week 또는 Month로 전환하세요.
             </p>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setGanttViewMode('Week')}
-                className="px-3 py-1.5 rounded-lg border border-sky-200 bg-white text-sky-700 text-xs font-bold hover:bg-sky-100 transition-colors"
-              >
-                Week 보기
-              </button>
-              <button
-                type="button"
-                onClick={() => setGanttViewMode('Month')}
-                className="px-3 py-1.5 rounded-lg border border-sky-200 bg-white text-sky-700 text-xs font-bold hover:bg-sky-100 transition-colors"
-              >
-                Month 보기
-              </button>
-            </div>
           </div>
         )}
 
-        <div className="flex-1 min-h-0">
+        <div className="min-h-0 min-w-0 flex-1">
           <GanttChart
             tasks={filteredTasks}
             vacations={vacations}
@@ -359,7 +328,7 @@ function ScheduleView({
             />
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

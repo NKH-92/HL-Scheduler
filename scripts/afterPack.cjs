@@ -12,6 +12,15 @@ const fileExists = async (filePath) => {
 };
 
 const findRcedit = async () => {
+  const envPath = process.env.RCEDIT_PATH;
+  if (envPath && (await fileExists(envPath))) return envPath;
+
+  const localRcedit = path.join(__dirname, '..', 'node_modules', 'rcedit', 'bin', 'rcedit.exe');
+  if (await fileExists(localRcedit)) return localRcedit;
+
+  const localRceditX64 = path.join(__dirname, '..', 'node_modules', 'rcedit', 'bin', 'rcedit-x64.exe');
+  if (await fileExists(localRceditX64)) return localRceditX64;
+
   const localAppData = process.env.LOCALAPPDATA;
   if (!localAppData) return null;
 
@@ -71,9 +80,11 @@ module.exports = async (context) => {
       await run(rcedit, args);
       return;
     } catch (error) {
-      if (attempt === 4) throw error;
+      if (attempt === 4) {
+        console.warn('rcedit icon patch failed after retries; continue without patch.', error?.message || error);
+        return;
+      }
       await new Promise((resolve) => setTimeout(resolve, 1500));
     }
   }
 };
-

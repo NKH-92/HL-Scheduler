@@ -1,18 +1,17 @@
-function TabButton({ active, onClick, icon, label }) {
+﻿function TabButton({ active, onClick, icon, label }) {
   return (
     <button
       onClick={onClick}
-      className={`relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all duration-300 ${
+      type="button"
+      className={`group relative flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-200 ${
         active
-          ? 'text-indigo-600 bg-white shadow-sm ring-1 ring-slate-200'
-          : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
+          ? 'bg-white text-slate-900 shadow-[0_8px_16px_-12px_rgba(15,23,42,0.7)] ring-1 ring-slate-200'
+          : 'text-slate-500 hover:text-slate-800 hover:bg-white/70'
       }`}
     >
-      {icon}
+      <span className={`transition-colors ${active ? 'text-blue-600' : 'text-slate-400 group-hover:text-slate-600'}`}>{icon}</span>
       <span className="hidden sm:inline">{label}</span>
-      {active && (
-        <span className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-1 h-1 bg-indigo-600 rounded-full md:hidden" />
-      )}
+      {active && <span className="absolute inset-x-3 -bottom-1 h-0.5 rounded-full bg-blue-600" />}
     </button>
   );
 }

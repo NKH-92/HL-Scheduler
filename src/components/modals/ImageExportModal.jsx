@@ -1,4 +1,4 @@
-import Modal from '../Modal';
+﻿import Modal from '../Modal';
 import { XIcon } from '../Icons';
 
 function ImageExportModal({
@@ -22,17 +22,17 @@ function ImageExportModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      ariaLabel="이미지 저장"
-      panelClassName="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 p-6 space-y-5 animate-fade-in border border-white/20"
+      ariaLabel="이미지 내보내기"
+      panelClassName="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
     >
-      <div className="flex justify-between items-center">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-lg font-bold text-slate-800">이미지 저장</h3>
-          <p className="text-xs text-slate-500 mt-1">Gantt 차트를 PNG/JPG로 캡쳐합니다.</p>
+          <h3 className="text-lg font-bold text-slate-900">이미지 내보내기</h3>
+          <p className="mt-1 text-xs text-slate-500">간트 차트를 PNG/JPG 파일로 저장합니다.</p>
         </div>
         <button
           onClick={onClose}
-          className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"
+          className="rounded-full p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
           type="button"
           aria-label="닫기"
         >
@@ -40,11 +40,11 @@ function ImageExportModal({
         </button>
       </div>
 
-      <div className="space-y-4">
+      <div className="mt-5 space-y-4">
         <div>
-          <label className="block text-xs font-bold text-slate-500 mb-1">포맷</label>
+          <label className="field-label">파일 형식</label>
           <select
-            className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-sm"
             value={exportFormat}
             onChange={(e) => setExportFormat(e.target.value)}
           >
@@ -54,21 +54,21 @@ function ImageExportModal({
         </div>
 
         <div>
-          <label className="block text-xs font-bold text-slate-500 mb-1">캡쳐 범위</label>
+          <label className="field-label">내보내기 범위</label>
           <select
-            className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-sm"
             value={exportScope}
             onChange={(e) => setExportScope(e.target.value)}
           >
-            <option value="full">전체 차트(스크롤 포함, 현재 필터)</option>
-            <option value="visible">현재 화면(보이는 영역)</option>
+            <option value="full">전체 차트 (현재 필터 기준)</option>
+            <option value="visible">현재 보이는 화면</option>
           </select>
         </div>
 
         <div>
-          <label className="block text-xs font-bold text-slate-500 mb-1">해상도(scale)</label>
+          <label className="field-label">해상도 (Scale)</label>
           <select
-            className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-sm"
             value={String(exportScale)}
             onChange={(e) => setExportScale(Number(e.target.value))}
           >
@@ -79,10 +79,10 @@ function ImageExportModal({
           </select>
         </div>
 
-        <label className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
-          <div className="min-w-0">
-            <p className="text-xs font-bold text-slate-600">Today 표시</p>
-            <p className="text-[10px] text-slate-400 mt-0.5 truncate">내보내기 이미지에 Today 선/라벨 포함</p>
+        <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+          <div>
+            <p className="text-xs font-semibold text-slate-700">Today 표시 포함</p>
+            <p className="text-[11px] text-slate-500">저장 이미지에 Today 기준선을 함께 표시합니다.</p>
           </div>
           <input
             type="checkbox"
@@ -93,11 +93,11 @@ function ImageExportModal({
         </label>
 
         <div>
-          <label className="block text-xs font-bold text-slate-500 mb-1">파일명 (선택)</label>
+          <label className="field-label">파일명 (선택)</label>
           <input
             type="text"
-            className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-            placeholder="미입력 시 자동 생성"
+            className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-sm"
+            placeholder="비워두면 자동 생성"
             value={exportFileName}
             onChange={(e) => setExportFileName(e.target.value)}
           />
@@ -105,13 +105,13 @@ function ImageExportModal({
 
         {exportFormat === 'jpg' && (
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1">JPG 품질 (0.5~1)</label>
+            <label className="field-label">JPG 품질 (0.5 ~ 1.0)</label>
             <input
               type="number"
               step="0.05"
               min="0.5"
               max="1"
-              className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+              className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-sm"
               value={exportJpegQuality}
               onChange={(e) => setExportJpegQuality(Number(e.target.value))}
             />
@@ -120,7 +120,7 @@ function ImageExportModal({
 
         <button
           onClick={exportGanttImage}
-          className="w-full bg-emerald-500 text-white font-bold py-3 rounded-xl hover:bg-emerald-600 shadow-lg shadow-emerald-200 transition-all active:scale-[0.99]"
+          className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700"
           type="button"
         >
           저장하기

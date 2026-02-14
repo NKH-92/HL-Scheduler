@@ -1,10 +1,20 @@
-import { useRef } from 'react';
+﻿import { useRef } from 'react';
 import TabButton from './TabButton';
-import { BarChart2, CalendarIcon, CheckSquare, Info, Layout, Save, Upload } from './Icons';
+import { BarChart2, CalendarIcon, CheckSquare, Download, FileText, Info, Layout, Save, Users } from './Icons';
+
+const getDisplayVersion = () => {
+  const raw = typeof __APP_VERSION__ !== 'undefined' ? String(__APP_VERSION__) : '';
+  const parts = raw.split('.').filter(Boolean);
+  if (parts.length >= 2) return `${parts[0]}.${parts[1]}`;
+  if (parts.length === 1) return parts[0];
+  return '';
+};
 
 function AppHeader({
-  activeTab,
-  onTabChange,
+  activeMainTab,
+  onMainTabChange,
+  activeEditorTab,
+  onEditorTabChange,
   onSaveProject,
   onImportFile,
   showAppZoomControls = false,
@@ -12,122 +22,224 @@ function AppHeader({
   onZoomIn,
   onZoomOut,
   onZoomReset,
+  canAccessEditor = false,
+  isAuthenticated = false,
+  authEmail = '',
+  authProfile = null,
+  onOpenAuthModal,
+  onSignOut,
+  isAuthBusy = false,
 }) {
   const fileInputRef = useRef(null);
+  const isEditMode = canAccessEditor && activeMainTab === 'edit';
+  const versionLabel = getDisplayVersion();
+
+  const handleMainTabChange = (nextTab) => {
+    if (nextTab === 'edit' && !canAccessEditor) {
+      onOpenAuthModal?.();
+      return;
+    }
+    onMainTabChange(nextTab);
+  };
 
   return (
-    <header className="sticky top-0 z-40 w-full transition-all duration-300">
-      <div className="absolute inset-0 bg-white/80 backdrop-blur-md border-b border-slate-200/60 shadow-sm" />
-      <div className="relative w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-500/30">
-            <Layout size={20} />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">HL-Scheduler</h1>
-            <span className="text-[10px] font-semibold text-indigo-500 tracking-wider">프로젝트 스케줄러</span>
-          </div>
-        </div>
+    <header className="sticky top-0 z-40">
+      <div className="absolute inset-0 border-b border-slate-200/70 bg-white/78 backdrop-blur-xl" />
 
-        <nav className="hidden md:flex items-center bg-slate-100/50 p-1 rounded-xl border border-slate-200/50">
-          <TabButton
-            active={activeTab === 'tasks'}
-            onClick={() => onTabChange('tasks')}
-            icon={<CheckSquare size={16} />}
-            label="업무 관리"
-          />
-          <TabButton
-            active={activeTab === 'schedule'}
-            onClick={() => onTabChange('schedule')}
-            icon={<CalendarIcon size={16} />}
-            label="스케줄"
-          />
-          <TabButton
-            active={activeTab === 'dashboard'}
-            onClick={() => onTabChange('dashboard')}
-            icon={<BarChart2 size={16} />}
-            label="대시보드"
-          />
-          <TabButton
-            active={activeTab === 'help'}
-            onClick={() => onTabChange('help')}
-            icon={<Info size={16} />}
-            label="Help"
-          />
-        </nav>
-
-        <div className="md:hidden">
-          <label className="sr-only" htmlFor="mobile-tab-select">
-            탭 선택
-          </label>
-          <select
-            id="mobile-tab-select"
-            value={activeTab}
-            onChange={(e) => onTabChange(e.target.value)}
-            className="bg-slate-100/50 border border-slate-200/50 rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-          >
-            <option value="tasks">업무 관리</option>
-            <option value="schedule">스케줄</option>
-            <option value="dashboard">대시보드</option>
-            <option value="help">Help</option>
-          </select>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {showAppZoomControls && (
-            <div className="hidden sm:flex items-center gap-1 bg-slate-100/50 border border-slate-200/50 rounded-xl p-1">
-              <button
-                type="button"
-                onClick={onZoomOut}
-                className="w-8 h-8 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-white transition-colors font-bold leading-none"
-                title="화면 축소"
-                aria-label="화면 축소"
-              >
-                -
-              </button>
-              <button
-                type="button"
-                onClick={onZoomReset}
-                className="px-2 h-8 rounded-lg text-[11px] tabular-nums font-extrabold text-slate-600 hover:text-indigo-600 hover:bg-white transition-colors"
-                title="화면 크기 초기화"
-                aria-label="화면 크기 초기화"
-              >
-                {Math.round(Number(appZoomPercent) || 100)}%
-              </button>
-              <button
-                type="button"
-                onClick={onZoomIn}
-                className="w-8 h-8 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-white transition-colors font-bold leading-none"
-                title="화면 확대"
-                aria-label="화면 확대"
-              >
-                +
-              </button>
+      <div className="relative px-4 py-3 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 p-2.5 text-white shadow-lg shadow-blue-500/30">
+                <Layout size={20} />
+              </div>
+              <div className="min-w-0">
+                <h1 className="truncate text-[20px] font-extrabold tracking-tight text-slate-900">HL-Scheduler</h1>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-semibold tracking-wide text-slate-500">Project Timeline Studio</span>
+                  {versionLabel ? (
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-500">
+                      v{versionLabel}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
             </div>
+
+            <div className="hidden min-w-0 items-center rounded-2xl border border-slate-200/70 bg-slate-50/80 p-1 md:flex">
+              {canAccessEditor && (
+                <TabButton
+                  active={activeMainTab === 'edit'}
+                  onClick={() => handleMainTabChange('edit')}
+                  icon={<Layout size={16} />}
+                  label="편집"
+                />
+              )}
+              <TabButton
+                active={activeMainTab === 'browse'}
+                onClick={() => handleMainTabChange('browse')}
+                icon={<Users size={16} />}
+                label="공개 일정"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              {isAuthenticated ? (
+                <>
+                  <div className="hidden max-w-[320px] rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs sm:block">
+                    <div className="truncate font-semibold text-slate-700">{authEmail || '로그인 사용자'}</div>
+                    {authProfile && (
+                      <div className="truncate text-[11px] text-slate-500">
+                        {`${authProfile.name || '-'} / ${authProfile.department || '-'} / ${authProfile.position || '-'}`}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onSignOut?.()}
+                    disabled={isAuthBusy}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    로그아웃
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onOpenAuthModal?.()}
+                  disabled={isAuthBusy}
+                  className="rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  로그인
+                </button>
+              )}
+
+              {showAppZoomControls && (
+                <div className="hidden items-center gap-1 rounded-xl border border-slate-200 bg-white/70 p-1 sm:flex">
+                  <button
+                    type="button"
+                    onClick={onZoomOut}
+                    className="h-8 w-8 rounded-lg font-bold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+                    title="화면 축소"
+                    aria-label="화면 축소"
+                  >
+                    -
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onZoomReset}
+                    className="h-8 rounded-lg px-2 text-[11px] font-bold tabular-nums text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+                    title="화면 배율 초기화"
+                    aria-label="화면 배율 초기화"
+                  >
+                    {Math.round(Number(appZoomPercent) || 100)}%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onZoomIn}
+                    className="h-8 w-8 rounded-lg font-bold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+                    title="화면 확대"
+                    aria-label="화면 확대"
+                  >
+                    +
+                  </button>
+                </div>
+              )}
+
+              {isEditMode && (
+                <>
+                  <button
+                    onClick={onSaveProject}
+                    className="rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-700"
+                    title="프로젝트 백업(JSON)"
+                    type="button"
+                  >
+                    <Save size={18} />
+                  </button>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-700"
+                    title="프로젝트 불러오기(JSON)"
+                    type="button"
+                  >
+                    <Download size={18} />
+                  </button>
+                </>
+              )}
+
+              <input type="file" ref={fileInputRef} onChange={onImportFile} className="hidden" accept=".json" />
+            </div>
+          </div>
+
+          <div className="md:hidden">
+            <label className="sr-only" htmlFor="mobile-main-tab-select">
+              메인 탭
+            </label>
+            <select
+              id="mobile-main-tab-select"
+              value={canAccessEditor ? activeMainTab : 'browse'}
+              onChange={(e) => handleMainTabChange(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            >
+              {canAccessEditor && <option value="edit">편집</option>}
+              <option value="browse">공개 일정</option>
+            </select>
+          </div>
+
+          {isEditMode && (
+            <>
+              <nav className="hidden items-center rounded-2xl border border-slate-200/70 bg-slate-50/80 p-1 md:flex">
+                <TabButton
+                  active={activeEditorTab === 'tasks'}
+                  onClick={() => onEditorTabChange('tasks')}
+                  icon={<CheckSquare size={16} />}
+                  label="작업 관리"
+                />
+                <TabButton
+                  active={activeEditorTab === 'schedule'}
+                  onClick={() => onEditorTabChange('schedule')}
+                  icon={<CalendarIcon size={16} />}
+                  label="간트 / 일정"
+                />
+                <TabButton
+                  active={activeEditorTab === 'dashboard'}
+                  onClick={() => onEditorTabChange('dashboard')}
+                  icon={<BarChart2 size={16} />}
+                  label="대시보드"
+                />
+                <TabButton
+                  active={activeEditorTab === 'help'}
+                  onClick={() => onEditorTabChange('help')}
+                  icon={<Info size={16} />}
+                  label="도움말"
+                />
+                <TabButton
+                  active={activeEditorTab === 'revisions'}
+                  onClick={() => onEditorTabChange('revisions')}
+                  icon={<FileText size={16} />}
+                  label="개정이력"
+                />
+              </nav>
+
+              <div className="md:hidden">
+                <label className="sr-only" htmlFor="mobile-editor-tab-select">
+                  편집 탭
+                </label>
+                <select
+                  id="mobile-editor-tab-select"
+                  value={activeEditorTab}
+                  onChange={(e) => onEditorTabChange(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                >
+                  <option value="tasks">작업 관리</option>
+                  <option value="schedule">간트 / 일정</option>
+                  <option value="dashboard">대시보드</option>
+                  <option value="help">도움말</option>
+                  <option value="revisions">개정이력</option>
+                </select>
+              </div>
+            </>
           )}
-          <button
-            onClick={onSaveProject}
-            className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-            title="프로젝트 저장"
-            type="button"
-          >
-            <Save size={20} />
-          </button>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-            title="불러오기"
-            type="button"
-          >
-            <Upload size={20} />
-          </button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={onImportFile}
-            className="hidden"
-            accept=".json"
-          />
         </div>
       </div>
     </header>

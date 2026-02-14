@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
-import { Download, Edit2, FileText, Plus, Trash2 } from './Icons';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Download, Edit2, FileText, Plus, Trash2, Upload } from './Icons';
 
 const normalizeValue = (value) => String(value ?? '').trim();
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
 function TaskManagement({
   tasks,
@@ -15,40 +16,59 @@ function TaskManagement({
   openReportModal,
   onExportXlsx,
   updateTaskMemo,
+  onUploadPublic,
+  onCreateNewProject,
 }) {
+  const [textFilter, setTextFilter] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
+  const [dependencyFilter, setDependencyFilter] = useState('');
   const [startSortDir, setStartSortDir] = useState('');
+  const [memoDrafts, setMemoDrafts] = useState({});
+
   const departments = useMemo(() => {
     const set = new Set();
-    tasks.forEach((t) => {
-      const v = normalizeValue(t.department);
-      if (v) set.add(v);
+    tasks.forEach((task) => {
+      const value = normalizeValue(task.department);
+      if (value) set.add(value);
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'ko'));
   }, [tasks]);
 
   const assignees = useMemo(() => {
     const set = new Set();
-    tasks.forEach((t) => {
-      const v = normalizeValue(t.assignee);
-      if (v) set.add(v);
+    tasks.forEach((task) => {
+      const value = normalizeValue(task.assignee);
+      if (value) set.add(value);
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'ko'));
   }, [tasks]);
 
-  const hasEmptyDepartment = useMemo(() => tasks.some((t) => !normalizeValue(t.department)), [tasks]);
-  const hasEmptyAssignee = useMemo(() => tasks.some((t) => !normalizeValue(t.assignee)), [tasks]);
+  const hasEmptyDepartment = useMemo(() => tasks.some((task) => !normalizeValue(task.department)), [tasks]);
+  const hasEmptyAssignee = useMemo(() => tasks.some((task) => !normalizeValue(task.assignee)), [tasks]);
+
+  const taskNameById = useMemo(() => {
+    const map = new Map();
+    tasks.forEach((task) => {
+      const id = String(task.id || '').trim();
+      if (!id) return;
+      const name = String(task.taskName || '').trim() || id;
+      map.set(id, name);
+    });
+    return map;
+  }, [tasks]);
 
   const visibleTasks = useMemo(() => {
-    return tasks.filter((t) => {
-      const dept = normalizeValue(t.department);
-      const assignee = normalizeValue(t.assignee);
+    const query = normalizeValue(textFilter).toLowerCase();
+    return tasks.filter((task) => {
+      const department = normalizeValue(task.department);
+      const assignee = normalizeValue(task.assignee);
+      const hasDependency = Array.isArray(task.dependencies) && task.dependencies.length > 0;
 
       if (departmentFilter) {
         if (departmentFilter === '__EMPTY__') {
-          if (dept) return false;
-        } else if (dept !== departmentFilter) {
+          if (department) return false;
+        } else if (department !== departmentFilter) {
           return false;
         }
       }
@@ -61,241 +81,377 @@ function TaskManagement({
         }
       }
 
-      return true;
+      if (dependencyFilter === 'has' && !hasDependency) return false;
+      if (dependencyFilter === 'none' && hasDependency) return false;
+
+      if (!query) return true;
+      const dependencyText = Array.isArray(task.dependencies)
+        ? task.dependencies.map((depId) => taskNameById.get(String(depId)) || String(depId)).join(' ')
+        : '';
+
+      const haystack = [
+        task.category,
+        task.taskName,
+        task.department,
+        task.assignee,
+        task.assigneePosition,
+        task.assigneeEmail,
+        task.memo,
+        task.start,
+        task.end,
+        dependencyText,
+      ]
+        .map((value) => String(value || '').toLowerCase())
+        .join(' ');
+
+      return haystack.includes(query);
     });
-  }, [tasks, departmentFilter, assigneeFilter]);
+  }, [tasks, textFilter, departmentFilter, assigneeFilter, dependencyFilter, taskNameById]);
+
+  useEffect(() => {
+    setMemoDrafts((prev) => {
+      const taskMemoById = new Map(tasks.map((task) => [String(task.id), String(task.memo ?? '')]));
+      let changed = false;
+      const next = {};
+
+      Object.entries(prev).forEach(([taskId, draftMemo]) => {
+        const savedMemo = taskMemoById.get(taskId);
+        if (savedMemo == null) {
+          changed = true;
+          return;
+        }
+        if (draftMemo === savedMemo) {
+          changed = true;
+          return;
+        }
+        next[taskId] = draftMemo;
+      });
+
+      return changed ? next : prev;
+    });
+  }, [tasks]);
+
+  const handleMemoDraftChange = useCallback((taskId, value) => {
+    const safeId = String(taskId);
+    const nextMemo = String(value ?? '');
+    setMemoDrafts((prev) => {
+      if (hasOwn(prev, safeId) && prev[safeId] === nextMemo) return prev;
+      return { ...prev, [safeId]: nextMemo };
+    });
+  }, []);
+
+  const commitMemoDraft = useCallback(
+    (taskId, currentMemo) => {
+      const safeId = String(taskId);
+      if (!hasOwn(memoDrafts, safeId)) return;
+      const draftMemo = memoDrafts[safeId];
+      const savedMemo = String(currentMemo ?? '');
+      if (draftMemo !== savedMemo) updateTaskMemo(safeId, draftMemo);
+
+      setMemoDrafts((prev) => {
+        if (!hasOwn(prev, safeId)) return prev;
+        const { [safeId]: _removed, ...rest } = prev;
+        return rest;
+      });
+    },
+    [memoDrafts, updateTaskMemo],
+  );
 
   const handleMove = (taskId, direction) => {
-    if (!departmentFilter && !assigneeFilter) {
+    if (!textFilter && !departmentFilter && !assigneeFilter && !dependencyFilter) {
       moveTask(taskId, direction);
       return;
     }
 
-    const idx = visibleTasks.findIndex((t) => t.id === taskId);
-    if (idx < 0) return;
-    const neighbor = visibleTasks[idx + direction];
+    const index = visibleTasks.findIndex((task) => task.id === taskId);
+    if (index < 0) return;
+    const neighbor = visibleTasks[index + direction];
     if (!neighbor) return;
-    const neighborFullIndex = tasks.findIndex((t) => t.id === neighbor.id);
-    if (neighborFullIndex < 0) return;
-    moveTaskToIndex(taskId, neighborFullIndex + 1);
+    const fullIndex = tasks.findIndex((task) => task.id === neighbor.id);
+    if (fullIndex < 0) return;
+    moveTaskToIndex(taskId, fullIndex + 1);
+  };
+
+  const formatDependencies = (task) => {
+    const deps = Array.isArray(task.dependencies) ? task.dependencies : [];
+    if (!deps.length) return '-';
+    return deps.map((depId) => taskNameById.get(String(depId)) || String(depId)).join(', ');
   };
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white/80 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-slate-200/60 flex flex-col md:flex-row items-start md:items-center gap-4">
-        <div className="flex-1 w-full">
-          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Project Name</label>
-          <input
-            type="text"
-            value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
-            placeholder="프로젝트 명칭을 입력하세요"
-            className="w-full text-lg font-bold text-slate-800 border-b-2 border-slate-200 focus:border-indigo-500 focus:outline-none py-1 transition-colors bg-transparent placeholder-slate-300"
-          />
-        </div>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
-          <button
-            onClick={() => openReportModal()}
-            className="w-full md:w-auto flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-indigo-700 transition-colors shadow-sm whitespace-nowrap"
-            type="button"
-            title="전체 프로젝트 기준으로 보고서를 생성합니다."
-          >
-            <FileText size={18} /> 보고서 출력
-          </button>
-          <button
-            onClick={() => onExportXlsx?.(visibleTasks)}
-            disabled={!onExportXlsx}
-            className="w-full md:w-auto flex items-center justify-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors shadow-sm whitespace-nowrap"
-            type="button"
-            title="현재 필터 기준으로 엑셀을 내보냅니다."
-          >
-            <Download size={18} /> Excel(XLSX)
-          </button>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="bg-slate-50/50 px-6 py-4 border-b border-slate-100 flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
-          <div>
-            <h2 className="text-lg font-bold text-slate-800 tracking-tight">업무 목록</h2>
-            <p className="text-xs text-slate-500 mt-1">
-              표시 {visibleTasks.length}건 / 전체 {tasks.length}건
-            </p>
+    <div className="animate-fade-in space-y-5">
+      <section className="glass-panel p-4 lg:p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="w-full lg:max-w-xl">
+            <label className="field-label">프로젝트명</label>
+            <input
+              type="text"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder="프로젝트 이름을 입력하세요"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            />
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-            <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200">
-              <button
-                type="button"
-                onClick={() => {
-                  setStartSortDir('asc');
-                  sortTasksByStart('asc');
-                }}
-                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  startSortDir === 'asc' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-800'
-                }`}
-                title="업무 시작일 기준 오름차순 정렬"
-              >
-                시작일↑
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setStartSortDir('desc');
-                  sortTasksByStart('desc');
-                }}
-                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  startSortDir === 'desc' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-800'
-                }`}
-                title="업무 시작일 기준 내림차순 정렬"
-              >
-                시작일↓
-              </button>
-            </div>
-
-            <select
-              className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-              value={departmentFilter}
-              onChange={(e) => setDepartmentFilter(e.target.value)}
-              aria-label="부서 필터"
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => onCreateNewProject?.()}
+              disabled={!onCreateNewProject}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <option value="">전체 부서</option>
-              {hasEmptyDepartment && <option value="__EMPTY__">미지정</option>}
-              {departments.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
-
-            <select
-              className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-              value={assigneeFilter}
-              onChange={(e) => setAssigneeFilter(e.target.value)}
-              aria-label="담당자 필터"
-            >
-              <option value="">전체 담당자</option>
-              {hasEmptyAssignee && <option value="__EMPTY__">미지정</option>}
-              {assignees.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
-
-            {(departmentFilter || assigneeFilter) && (
+              <Plus size={14} /> 새 프로젝트
+            </button>
+            {onUploadPublic && (
               <button
                 type="button"
-                onClick={() => {
-                  setDepartmentFilter('');
-                  setAssigneeFilter('');
-                }}
-                className="px-3 py-2 rounded-xl text-xs font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50"
+                onClick={() => onUploadPublic()}
+                className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
               >
-                필터 초기화
+                <Upload size={14} /> 업로드
               </button>
             )}
-
             <button
-              onClick={() => openModal()}
-              className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-700 transition-colors shadow-sm"
               type="button"
+              onClick={() => openReportModal()}
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-700"
             >
-              <Plus size={16} /> 업무 추가
+              <FileText size={14} /> 보고서
+            </button>
+            <button
+              type="button"
+              onClick={() => onExportXlsx?.(visibleTasks)}
+              disabled={!onExportXlsx}
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Download size={14} /> Excel
+            </button>
+            <button
+              type="button"
+              onClick={() => openModal()}
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-700"
+            >
+              <Plus size={14} /> 작업 추가
             </button>
           </div>
         </div>
+      </section>
 
-        <div className="overflow-auto custom-scrollbar max-h-[70vh]">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-slate-100 text-slate-600 font-medium">
+      <section className="glass-panel p-4 lg:p-5">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div className="xl:col-span-2">
+            <label className="field-label">검색</label>
+            <input
+              type="text"
+              value={textFilter}
+              onChange={(e) => setTextFilter(e.target.value)}
+              placeholder="작업명, 부서, 담당자, 메모, 선행작업"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            />
+          </div>
+
+          <div>
+            <label className="field-label">부서</label>
+            <select
+              value={departmentFilter}
+              onChange={(e) => setDepartmentFilter(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            >
+              <option value="">전체</option>
+              {hasEmptyDepartment && <option value="__EMPTY__">미입력</option>}
+              {departments.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="field-label">담당자</label>
+            <select
+              value={assigneeFilter}
+              onChange={(e) => setAssigneeFilter(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            >
+              <option value="">전체</option>
+              {hasEmptyAssignee && <option value="__EMPTY__">미입력</option>}
+              {assignees.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="field-label">선행작업</label>
+            <select
+              value={dependencyFilter}
+              onChange={(e) => setDependencyFilter(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            >
+              <option value="">전체</option>
+              <option value="has">있음</option>
+              <option value="none">없음</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setStartSortDir('asc');
+                sortTasksByStart('asc');
+              }}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                startSortDir === 'asc' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              시작일 오름차순
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStartSortDir('desc');
+                sortTasksByStart('desc');
+              }}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                startSortDir === 'desc' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              시작일 내림차순
+            </button>
+          </div>
+
+          <span className="ml-auto text-xs text-slate-500">
+            전체 {tasks.length}개 중 {visibleTasks.length}개 표시
+          </span>
+        </div>
+      </section>
+
+      <section className="glass-panel overflow-hidden">
+        <div className="max-h-[62vh] overflow-auto custom-scrollbar">
+          <table className="w-full min-w-[960px] text-left text-sm">
+            <thead className="sticky top-0 z-10 bg-slate-100/95 text-slate-600 backdrop-blur">
               <tr>
-                <th className="px-4 py-3 text-center whitespace-nowrap w-16">순서</th>
-                <th className="px-4 py-3 whitespace-nowrap">대분류</th>
-                <th className="px-4 py-3 whitespace-nowrap">상세내용</th>
-                <th className="px-4 py-3 whitespace-nowrap">부서</th>
-                <th className="px-4 py-3 whitespace-nowrap">담당자</th>
-                <th className="px-4 py-3 whitespace-nowrap">기간</th>
-                <th className="px-4 py-3 text-center whitespace-nowrap">진척도</th>
-                <th className="px-4 py-3 whitespace-nowrap min-w-[240px]">메모</th>
-                <th className="px-4 py-3 text-right whitespace-nowrap">관리</th>
+                <th className="w-24 px-3 py-3 text-center">순서</th>
+                <th className="px-3 py-3">구분</th>
+                <th className="px-3 py-3">작업명</th>
+                <th className="px-3 py-3">부서</th>
+                <th className="px-3 py-3">담당자</th>
+                <th className="px-3 py-3">직위</th>
+                <th className="px-3 py-3">기간</th>
+                <th className="px-3 py-3">선행작업</th>
+                <th className="px-3 py-3 text-center">진척률</th>
+                <th className="min-w-[240px] px-3 py-3">메모</th>
+                <th className="px-3 py-3 text-right">관리</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {visibleTasks.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="px-4 py-8 text-center text-slate-400">
-                    {tasks.length === 0 ? '등록된 업무가 없습니다.' : '조건에 맞는 업무가 없습니다.'}
+                  <td colSpan="11" className="px-4 py-12 text-center text-slate-400">
+                    {tasks.length === 0 ? '등록된 작업이 없습니다.' : '필터 조건에 맞는 작업이 없습니다.'}
                   </td>
                 </tr>
               ) : (
-                visibleTasks.map((task, index) => (
-                  <tr key={task.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-center whitespace-nowrap">
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          onClick={() => handleMove(task.id, -1)}
-                          disabled={index === 0}
-                          className={`px-2 py-1 rounded border text-xs ${index === 0 ? 'opacity-30' : 'hover:bg-slate-100'}`}
-                          type="button"
-                        >
-                          ▲
-                        </button>
-                        <button
-                          onClick={() => handleMove(task.id, 1)}
-                          disabled={index === visibleTasks.length - 1}
-                          className={`px-2 py-1 rounded border text-xs ${index === visibleTasks.length - 1 ? 'opacity-30' : 'hover:bg-slate-100'}`}
-                          type="button"
-                        >
-                          ▼
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 font-medium text-slate-800">{task.category}</td>
-                    <td className="px-4 py-3">{task.taskName}</td>
-                    <td className="px-4 py-3">
-                      <span className="bg-slate-200 text-slate-700 px-2 py-0.5 rounded text-xs">{task.department}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-blue-600 font-bold">{task.assignee || '-'}</span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 text-xs">
-                      {task.start || '-'} ~ {task.end || task.start || '-'}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <div className="flex items-center gap-2 justify-center">
-                        <div className="w-16 h-2 bg-slate-200 rounded-full overflow-hidden">
-                          <div className={`${task.progress === 100 ? 'bg-emerald-500' : 'bg-blue-500'} h-full`} style={{ width: `${task.progress}%` }} />
+                visibleTasks.map((task, index) => {
+                  const dependencies = formatDependencies(task);
+                  const taskId = String(task.id);
+                  const memoValue = hasOwn(memoDrafts, taskId) ? memoDrafts[taskId] : String(task.memo ?? '');
+                  const atTop = index === 0;
+                  const atBottom = index === visibleTasks.length - 1;
+                  return (
+                    <tr key={task.id} className="bg-white/70 hover:bg-slate-50/90">
+                      <td className="px-3 py-3 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleMove(task.id, -1)}
+                            disabled={atTop}
+                            className={`rounded-lg border px-2 py-1 text-[11px] font-semibold ${
+                              atTop
+                                ? 'cursor-not-allowed border-slate-200 text-slate-300'
+                                : 'border-slate-300 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            위
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMove(task.id, 1)}
+                            disabled={atBottom}
+                            className={`rounded-lg border px-2 py-1 text-[11px] font-semibold ${
+                              atBottom
+                                ? 'cursor-not-allowed border-slate-200 text-slate-300'
+                                : 'border-slate-300 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            아래
+                          </button>
                         </div>
-                        <span className="text-xs">{task.progress}%</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <textarea
-                        value={String(task.memo ?? '')}
-                        onChange={(e) => updateTaskMemo(task.id, e.target.value)}
-                        placeholder="진행 중 특이사항을 기록하세요."
-                        rows={2}
-                        className="w-full min-w-[240px] bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-y"
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex justify-end gap-2">
-                        <button onClick={() => openModal(task)} className="text-blue-500 hover:text-blue-700">
-                          <Edit2 size={16} />
-                        </button>
-                        <button onClick={() => handleDelete(task.id)} className="text-red-400 hover:text-red-600">
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="px-3 py-3 font-medium text-slate-800">{task.category || '-'}</td>
+                      <td className="px-3 py-3">{task.taskName || '-'}</td>
+                      <td className="px-3 py-3">{task.department || '-'}</td>
+                      <td className="px-3 py-3">{task.assignee || '-'}</td>
+                      <td className="px-3 py-3">{task.assigneePosition || '-'}</td>
+                      <td className="px-3 py-3 text-xs text-slate-500">
+                        {task.start || '-'} ~ {task.end || task.start || '-'}
+                      </td>
+                      <td className="max-w-[220px] truncate px-3 py-3 text-xs text-slate-600" title={dependencies}>
+                        {dependencies}
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <div className="mx-auto flex w-[86px] items-center gap-2">
+                          <div className="h-2 w-14 overflow-hidden rounded-full bg-slate-200">
+                            <div
+                              className={`${task.progress === 100 ? 'bg-emerald-500' : 'bg-blue-500'} h-full transition-all`}
+                              style={{ width: `${task.progress}%` }}
+                            />
+                          </div>
+                          <span className="text-[11px] font-semibold text-slate-600">{task.progress}%</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 align-top">
+                        <textarea
+                          value={memoValue}
+                          onChange={(e) => handleMemoDraftChange(taskId, e.target.value)}
+                          onBlur={() => commitMemoDraft(taskId, task.memo)}
+                          rows={2}
+                          placeholder="작업 메모를 입력하세요"
+                          className="w-full min-w-[240px] resize-y rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                        />
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openModal(task)}
+                            className="rounded-lg p-1 text-blue-600 transition hover:bg-blue-50 hover:text-blue-700"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(task.id)}
+                            className="rounded-lg p-1 text-rose-500 transition hover:bg-rose-50 hover:text-rose-700"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

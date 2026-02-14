@@ -1,130 +1,89 @@
-function Help() {
+﻿function Help() {
   return (
-    <div className="animate-fade-in space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Help</h2>
-        <p className="text-sm text-slate-500 mt-1">문의/정보</p>
-      </div>
+    <div className="animate-fade-in space-y-5">
+      <section className="glass-panel p-5">
+        <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">도움말</h2>
+        <p className="mt-1 text-sm text-slate-500">처음 사용하는 분도 바로 사용할 수 있도록 핵심 흐름만 정리했습니다.</p>
+      </section>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-        <h3 className="text-sm font-bold text-slate-700">Contact</h3>
-        <div className="mt-3 space-y-1 text-sm text-slate-700">
-          <div className="font-semibold">품질보증부 SQA 남광현선임</div>
-          <a className="text-indigo-600 font-semibold hover:underline" href="mailto:nkh92@hanlim.com">
+      <section className="glass-panel p-5">
+        <h3 className="text-sm font-bold text-slate-800">문의</h3>
+        <div className="mt-3 text-sm text-slate-700">
+          <p className="font-semibold">SQA팀 남광현</p>
+          <a className="font-semibold text-blue-600 hover:underline" href="mailto:nkh92@hanlim.com">
             nkh92@hanlim.com
           </a>
         </div>
+      </section>
 
-        <div className="mt-6 pt-6 border-t border-slate-100">
-          <h3 className="text-sm font-bold text-slate-700">Manual</h3>
-          <div className="mt-3 space-y-5 text-sm text-slate-700 leading-relaxed">
-            <div>
-              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">1) 기본 흐름</h4>
-              <ul className="mt-2 list-disc pl-5 space-y-1">
-                <li>
-                  <span className="font-semibold">업무 관리</span>에서 프로젝트명 입력 후 업무를 등록/수정합니다.
-                </li>
-                <li>
-                  <span className="font-semibold">스케줄</span>에서 Gantt 차트로 전체 흐름을 확인하고 드래그로 일정을 조정합니다.
-                </li>
-                <li>
-                  <span className="font-semibold">대시보드</span>에서 진행률과 업무 현황을 요약으로 확인합니다.
-                </li>
-                <li>필요 시 Excel/보고서/IMG로 내보냅니다.</li>
-              </ul>
-            </div>
+      <section className="glass-panel p-5">
+        <h3 className="text-sm font-bold text-slate-800">빠른 시작</h3>
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          <li>비로그인 상태에서는 `공개 일정` 조회만 가능합니다.</li>
+          <li>상단 `로그인` 후 승인된 계정이면 `편집` 탭이 활성화됩니다.</li>
+          <li>`편집` 탭은 `작업 관리`, `간트 / 일정`, `대시보드`, `도움말`, `개정이력`으로 구성됩니다.</li>
+          <li>작업을 먼저 등록한 뒤 간트 화면에서 일정과 범위를 조정하면 가장 빠르게 시작할 수 있습니다.</li>
+        </ul>
+      </section>
 
-            <div>
-              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">2) 업무 관리 탭</h4>
-              <ul className="mt-2 list-disc pl-5 space-y-1">
-                <li>프로젝트명은 저장/내보내기 파일명에 반영됩니다.</li>
-                <li>
-                  <span className="font-semibold">업무 추가/수정</span>: 구분/업무명은 필수이며, 담당자/부서/기간/진행률/메모를 관리합니다.
-                </li>
-                <li>
-                  <span className="font-semibold">정렬/이동</span>: 시작일 정렬 및 위/아래 이동으로 표시 순서를 조정할 수 있습니다.
-                </li>
-                <li>
-                  <span className="font-semibold">필터</span>: 부서/담당자 필터는 이 탭에서만 적용됩니다.
-                </li>
-                <li>
-                  <span className="font-semibold">보고서</span>: 전체 프로젝트 기준으로 출력됩니다. (필터 무시)
-                </li>
-                <li>
-                  <span className="font-semibold">Excel</span>: 현재 부서/담당자 필터 기준으로 내보냅니다.
-                </li>
-              </ul>
-            </div>
+      <section className="glass-panel p-5">
+        <h3 className="text-sm font-bold text-slate-800">작업 관리</h3>
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          <li>작업 추가/수정 시 `구분`, `작업명`은 필수입니다.</li>
+          <li>검색 필터로 작업을 빠르게 찾을 수 있습니다.</li>
+          <li>시작일 정렬/역정렬, 순서 이동 기능을 지원합니다.</li>
+          <li>상단 버튼으로 `보고서(Word)`, `Excel`, `업로드`를 실행할 수 있습니다.</li>
+        </ul>
+      </section>
 
-            <div>
-              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">3) 스케줄 탭(Gantt)</h4>
-              <ul className="mt-2 list-disc pl-5 space-y-1">
-                <li>
-                  상단 검색창으로 <span className="font-semibold">업무명/부서/담당자</span>를 필터링합니다.
-                </li>
-                <li>
-                  <span className="font-semibold">Day/Week/Month</span> 보기 전환, 간격 조절(앞/뒤), 한 화면 맞춤, Zoom을 지원합니다.
-                </li>
-                <li>
-                  Day 보기에서 1년 이상이면 성능 보호를 위해 <span className="font-semibold">한 화면 맞춤이 자동 해제</span>됩니다.
-                </li>
-                <li>
-                  막대를 <span className="font-semibold">드래그</span>하면 전체 이동, 양끝을 잡아 <span className="font-semibold">기간 조절</span>이 가능합니다.
-                </li>
-                <li>
-                  <span className="font-semibold">휴가(일정 제외)</span>를 등록하면 차트에 음영/라벨로 표시됩니다.
-                </li>
-                <li>
-                  <span className="font-semibold">IMG</span> 버튼으로 현재 화면 또는 전체 차트를 이미지로 저장합니다. (현재 검색 필터 기준)
-                </li>
-              </ul>
-            </div>
+      <section className="glass-panel p-5">
+        <h3 className="text-sm font-bold text-slate-800">간트 / 일정</h3>
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          <li>`Day / Week / Month` 보기 전환과 Zoom, 화면 맞춤, 범위 여백 조정이 가능합니다.</li>
+          <li>차트 바 드래그로 일정 이동, 양 끝 핸들 드래그로 기간 조정이 가능합니다.</li>
+          <li>휴가/예외 일정을 추가하면 차트에 자동 반영됩니다.</li>
+          <li>`이미지` 버튼으로 현재 간트를 PNG/JPG로 저장할 수 있습니다.</li>
+        </ul>
+      </section>
 
-            <div>
-              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">4) 보고서 출력(Word)</h4>
-              <ul className="mt-2 list-disc pl-5 space-y-1">
-                <li>
-                  <span className="font-semibold">업무 관리</span> 탭의 보고서 버튼으로 출력합니다.
-                </li>
-                <li>
-                  1~2번 내용은 <span className="font-semibold">A4 세로</span>, 3번 일정 흐름은 <span className="font-semibold">가로 페이지</span>로 자동 분리됩니다.
-                </li>
-                <li>
-                  보고서 간트 이미지는 <span className="font-semibold">한 화면 맞춤 + Today 표시 + 최대 해상도</span>로 고정됩니다.
-                </li>
-                <li>
-                  보고서 미리보기에서 <span className="font-semibold">Day/Week/Month</span>를 선택하면 출력에도 반영됩니다.
-                </li>
-              </ul>
-            </div>
+      <section className="glass-panel p-5">
+        <h3 className="text-sm font-bold text-slate-800">저장 / 불러오기</h3>
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          <li>상단 저장 버튼으로 현재 프로젝트를 JSON 파일로 백업할 수 있습니다.</li>
+          <li>불러오기를 실행하면 현재 일정 데이터는 가져온 데이터로 대체됩니다.</li>
+          <li>배열(JSON array) 형식으로 불러오면 작업 목록만 적용됩니다.</li>
+        </ul>
+      </section>
 
-            <div>
-              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">5) IMG 내보내기</h4>
-              <ul className="mt-2 list-disc pl-5 space-y-1">
-                <li>포맷(PNG/JPG), 캡쳐 범위(전체/현재화면), 해상도(scale), 파일명, Today 표시를 선택합니다.</li>
-                <li>이미지 내보내기는 <span className="font-semibold">현재 검색 필터 기준</span>으로 저장됩니다.</li>
-                <li>
-                  <span className="font-semibold">EXE 버전</span>에서는 저장 버튼을 누르면 <span className="font-semibold">저장 경로 선택</span> 창이 뜹니다.
-                </li>
-                <li>
-                  일정이 매우 큰 경우에는 저장 실패를 막기 위해 <span className="font-semibold">자동으로 해상도가 낮아질 수</span> 있습니다.
-                </li>
-              </ul>
-            </div>
+      <section className="glass-panel p-5">
+        <h3 className="text-sm font-bold text-slate-800">공개 일정</h3>
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          <li>`작업 관리` 업로드/업데이트는 로그인 후 승인된 계정에서만 가능합니다.</li>
+          <li>`공개 일정` 탭에서 목록 검색, 미리보기 확인 후 필요한 경우 가져오기를 진행하세요.</li>
+          <li>Rev.4.0부터는 폴더 트리에서 범위를 선택한 뒤 목록을 조회할 수 있습니다.</li>
+          <li>프로젝트 업로드 시에는 사전에 생성된 폴더를 드롭다운에서 선택해야 합니다.</li>
+          <li>공개 일정 가져오기는 현재 편집 데이터를 덮어쓰므로, 필요하면 먼저 백업하세요.</li>
+        </ul>
+      </section>
 
-            <div>
-              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">6) 프로젝트 저장/불러오기</h4>
-              <ul className="mt-2 list-disc pl-5 space-y-1">
-                <li>
-                  상단 우측 아이콘으로 <span className="font-semibold">프로젝트 저장(JSON)</span> / <span className="font-semibold">불러오기(JSON)</span>가 가능합니다.
-                </li>
-                <li>저장한 파일을 다른 PC로 옮겨서 그대로 불러올 수 있습니다.</li>
-              </ul>
-            </div>
+      <section className="glass-panel p-5">
+        <h3 className="text-sm font-bold text-slate-800">Rev.4.0 폴더 관리</h3>
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          <li>폴더 생성/삭제/이동은 로그인한 `admin` 계정만 수행할 수 있습니다.</li>
+          <li>하위 폴더 또는 연결된 프로젝트가 남아 있으면 폴더 삭제가 차단됩니다.</li>
+          <li>프로젝트별 폴더 변경은 목록의 폴더 선택 박스에서 개별로 처리할 수 있습니다.</li>
+        </ul>
+      </section>
 
-          </div>
-        </div>
-      </div>
+      <section className="glass-panel p-5">
+        <h3 className="text-sm font-bold text-slate-800">v3.0 알림 메일 기능</h3>
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          <li>최초 업로드(새 일정 업로드) 시 `알림 대상 메일`에 유관부서 담당자/팀장 주소를 등록합니다.</li>
+          <li>수정 업로드(기존 일정 업데이트) 시 발신자/수정자는 로그인한 이메일 ID로 자동 연동됩니다.</li>
+          <li>업데이트가 성공하면 등록된 수신자에게 자동 알림 메일이 발송됩니다.</li>
+          <li>메일 본문에는 `프로젝트명`, `수정자`, `수정시각`이 포함됩니다.</li>
+        </ul>
+      </section>
     </div>
   );
 }

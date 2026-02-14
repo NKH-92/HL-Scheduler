@@ -1,4 +1,4 @@
-import Modal from '../Modal';
+﻿import Modal from '../Modal';
 import GanttChart from '../GanttChart';
 import { FileText, XIcon } from '../Icons';
 
@@ -17,23 +17,24 @@ function ReportModal({
 }) {
   const exportChartWidth = Number(reportChartWidth) || 0;
   const exportLeftPaneWidth = Number(reportLeftPaneWidth) || 0;
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      ariaLabel="보고서 내보내기"
-      panelClassName="bg-white rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden max-h-[90vh] flex flex-col relative z-10 animate-fade-in border border-white/20"
+      ariaLabel="보고서 미리보기"
+      panelClassName="relative z-10 flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
     >
-      <div className="bg-white px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+      <div className="flex items-start justify-between gap-3 border-b border-slate-200/70 px-6 py-4">
         <div>
-          <h3 className="text-lg font-bold text-slate-800">보고서 내보내기</h3>
-          <p className="text-xs text-slate-500 mt-1">
-            전체 프로젝트 기준으로 Gantt 미리보기와 Word 보고서를 생성합니다. 1~2는 세로, 3은 가로로 출력되며 이미지는 IMG 출력 형식을 사용합니다.
+          <h3 className="text-lg font-bold text-slate-900">보고서 미리보기</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            전체 프로젝트 기준으로 간트 미리보기를 확인한 뒤 Word 보고서를 생성합니다.
           </p>
         </div>
         <button
           onClick={onClose}
-          className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"
+          className="rounded-full p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
           type="button"
           aria-label="닫기"
         >
@@ -41,18 +42,18 @@ function ReportModal({
         </button>
       </div>
 
-      <div className="p-6 overflow-y-auto flex-1 bg-slate-50 custom-scrollbar space-y-6">
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-          <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Gantt View Mode</label>
+      <div className="custom-scrollbar flex-1 space-y-5 overflow-y-auto bg-slate-50/70 p-6">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <label className="field-label">Gantt View Mode</label>
           <div className="flex flex-wrap gap-2">
             {['Day', 'Week', 'Month'].map((mode) => (
               <button
                 key={mode}
                 onClick={() => setReportGanttMode(mode)}
-                className={`px-4 py-2 rounded-xl border text-sm font-bold transition-colors ${
+                className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
                   reportGanttMode === mode
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-white text-slate-600 hover:bg-slate-50'
+                    ? 'border-blue-600 bg-blue-600 text-white'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                 }`}
                 type="button"
               >
@@ -62,9 +63,9 @@ function ReportModal({
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-          <h4 className="text-sm font-bold mb-3 text-slate-700">보고서 미리보기 (차트)</h4>
-          <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto p-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <h4 className="text-sm font-bold text-slate-800">보고서 미리보기 (차트)</h4>
+          <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200 bg-white p-2">
             <GanttChart
               tasks={tasks}
               vacations={vacations}
@@ -80,10 +81,10 @@ function ReportModal({
         </div>
       </div>
 
-      <div className="bg-white px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
+      <div className="flex justify-end gap-2 border-t border-slate-200/70 px-6 py-4">
         <button
           onClick={onClose}
-          className="px-5 py-2.5 border border-slate-200 rounded-xl text-slate-600 font-medium hover:bg-white hover:border-slate-300 transition-colors text-sm"
+          className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
           type="button"
         >
           닫기
@@ -91,7 +92,7 @@ function ReportModal({
         <button
           onClick={generateWordReport}
           disabled={isGenerating}
-          className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 disabled:bg-indigo-300 flex items-center gap-2 shadow-lg shadow-indigo-200 transition-all active:scale-95 text-sm"
+          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           type="button"
         >
           {isGenerating ? (

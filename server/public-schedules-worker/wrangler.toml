@@ -1,0 +1,24 @@
+name = "hl-scheduler-public-schedules"
+main = "src/worker.mjs"
+compatibility_date = "2025-02-01"
+
+# Create a D1 database and paste its database_id here.
+[[d1_databases]]
+binding = "DB"
+database_name = "hl-scheduler"
+database_id = "a458a8fd-187f-4d19-bdf6-43549ac992a0"
+
+# Optional secrets:
+#   wrangler secret put PASSWORD_PEPPER
+#   wrangler secret put RESEND_API_KEY
+# Required for production:
+#   - never store real keys in this file
+#   - use Cloudflare Access + ALLOWED_ADMIN_EMAILS for admin worker
+[vars]
+READ_ONLY_MODE = "1"
+REQUIRE_ACCESS_EMAIL = "0"
+ALLOWED_ADMIN_EMAILS = "nkh92@hanlim.com"
+CORS_ALLOWED_ORIGINS = "*"
+SHARED_SCHEDULE_ID = ""
+ALLOWED_FROM_DOMAIN = "hanlim.com"
+SESSION_TTL_HOURS = "12"

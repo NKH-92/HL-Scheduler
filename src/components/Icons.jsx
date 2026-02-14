@@ -132,6 +132,22 @@ export const Search = (props) => (
   </Icon>
 );
 
+export const RefreshCw = (props) => (
+  <Icon {...props}>
+    <polyline points="23 4 23 10 17 10" />
+    <polyline points="1 20 1 14 7 14" />
+    <path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10" />
+    <path d="M20.49 15a9 9 0 0 1-14.13 3.36L1 14" />
+  </Icon>
+);
+
+export const ShieldCheck = (props) => (
+  <Icon {...props}>
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    <polyline points="9 12 11 14 15 10" />
+  </Icon>
+);
+
 export const Info = (props) => (
   <Icon {...props}>
     <circle cx="12" cy="12" r="10" />

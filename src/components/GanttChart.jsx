@@ -382,17 +382,17 @@ function GanttChart({
     !isExportMode && !fitEnabled && totalDays > 120 && Number.isFinite(colWidth) && colWidth > 0;
   const colStart = enableColVirtualization ? Math.max(0, Math.min(totalDays, colWindow.start)) : 0;
   const colEnd = enableColVirtualization ? Math.max(colStart, Math.min(totalDays, colWindow.end)) : totalDays;
+  const todayUtcMs = toUtcMidnightMs(new Date());
 
-  const renderDoubleHeader = () => {
+  const topHeaderClass =
+    'flex items-center justify-center border-r border-indigo-100 bg-indigo-50/50 text-xs font-bold text-indigo-900 h-9 backdrop-blur-sm leading-none';
+  const bottomHeaderBase =
+    'flex items-center justify-center border-r border-slate-100 text-[10px] h-8 font-medium leading-none';
+
+  const renderTopHeader = () => {
     const topHeaders = [];
-    const bottomHeaders = [];
 
-    const topHeaderClass =
-      'flex items-center justify-center border-r border-indigo-100 bg-indigo-50/50 text-xs font-bold text-indigo-900 h-9 backdrop-blur-sm leading-none';
-    const bottomHeaderBase =
-      'flex items-center justify-center border-r border-slate-100 text-[10px] h-8 font-medium leading-none';
-
-    if (viewMode === 'Day') {
+    if (viewMode === 'Day' || viewMode === 'Week') {
       let tempDate = new Date(minDate);
       for (let i = 0; i < totalDays;) {
         const currentYear = tempDate.getFullYear();
@@ -405,7 +405,7 @@ function GanttChart({
         }
         topHeaders.push(
           <div
-            key={`top-${i}`}
+            key={`top-${viewMode}-${i}`}
             className={topHeaderClass}
             style={{ width: `${daysInMonth * colWidth}px`, boxSizing: 'border-box' }}
           >
@@ -415,6 +415,37 @@ function GanttChart({
         i += daysInMonth;
         tempDate = new Date(checkDate);
       }
+      return topHeaders;
+    }
+
+    let tempDate = new Date(minDate);
+    for (let i = 0; i < totalDays;) {
+      const currentYear = tempDate.getFullYear();
+      let daysInYear = 0;
+      let checkDate = new Date(tempDate);
+      while (i + daysInYear < totalDays && checkDate.getFullYear() === currentYear) {
+        daysInYear += 1;
+        checkDate.setDate(checkDate.getDate() + 1);
+      }
+      topHeaders.push(
+        <div
+          key={`top-m-${i}`}
+          className={`${topHeaderClass} text-indigo-900`}
+          style={{ width: `${daysInYear * colWidth}px`, boxSizing: 'border-box' }}
+        >
+          {currentYear}년
+        </div>,
+      );
+      i += daysInYear;
+      tempDate = new Date(checkDate);
+    }
+    return topHeaders;
+  };
+
+  const renderBottomHeader = () => {
+    const bottomHeaders = [];
+
+    if (viewMode === 'Day') {
       let bottomDate = new Date(minDate);
       bottomDate.setDate(bottomDate.getDate() + colStart);
       if (colStart > 0) {
@@ -451,29 +482,10 @@ function GanttChart({
           />,
         );
       }
-    } else if (viewMode === 'Week') {
-      let tempDate = new Date(minDate);
-      for (let i = 0; i < totalDays;) {
-        const currentYear = tempDate.getFullYear();
-        const currentMonth = tempDate.getMonth();
-        let daysInMonth = 0;
-        let checkDate = new Date(tempDate);
-        while (i + daysInMonth < totalDays && checkDate.getMonth() === currentMonth) {
-          daysInMonth += 1;
-          checkDate.setDate(checkDate.getDate() + 1);
-        }
-        topHeaders.push(
-          <div
-            key={`top-w-${i}`}
-            className={topHeaderClass}
-            style={{ width: `${daysInMonth * colWidth}px`, boxSizing: 'border-box' }}
-          >
-            {currentYear}년 {currentMonth + 1}월
-          </div>,
-        );
-        i += daysInMonth;
-        tempDate = new Date(checkDate);
-      }
+      return bottomHeaders;
+    }
+
+    if (viewMode === 'Week') {
       let bottomDate = new Date(minDate);
       bottomDate.setDate(bottomDate.getDate() + colStart);
       if (colStart > 0) {
@@ -487,7 +499,6 @@ function GanttChart({
       }
       for (let i = colStart; i < colEnd; i += 1) {
         const isMonday = bottomDate.getDay() === 1;
-        const showLabel = isMonday;
         const isWeekend = bottomDate.getDay() === 0 || bottomDate.getDay() === 6;
         bottomHeaders.push(
           <div
@@ -497,7 +508,7 @@ function GanttChart({
             }`}
             style={{ width: `${colWidth}px`, boxSizing: 'border-box' }}
           >
-            {showLabel && (
+            {isMonday && (
               <span className="absolute left-1 top-1/2 -translate-y-1/2 whitespace-nowrap bg-white/90 backdrop-blur px-1.5 py-0.5 rounded-lg border border-slate-200 z-10 shadow-sm text-slate-700">
                 {bottomDate.getMonth() + 1}/{bottomDate.getDate()} ({getWeekNumber(bottomDate)}주)
               </span>
@@ -515,57 +526,32 @@ function GanttChart({
           />,
         );
       }
-    } else if (viewMode === 'Month') {
-      let tempDate = new Date(minDate);
-      for (let i = 0; i < totalDays;) {
-        const currentYear = tempDate.getFullYear();
-        let daysInYear = 0;
-        let checkDate = new Date(tempDate);
-        while (i + daysInYear < totalDays && checkDate.getFullYear() === currentYear) {
-          daysInYear += 1;
-          checkDate.setDate(checkDate.getDate() + 1);
-        }
-        topHeaders.push(
-          <div
-            key={`top-m-${i}`}
-            className={`${topHeaderClass} text-indigo-900`}
-            style={{ width: `${daysInYear * colWidth}px`, boxSizing: 'border-box' }}
-          >
-            {currentYear}년
-          </div>,
-        );
-        i += daysInYear;
-        tempDate = new Date(checkDate);
-      }
-      let bottomDate = new Date(minDate);
-      for (let i = 0; i < totalDays;) {
-        const currentMonth = bottomDate.getMonth();
-        let daysInMonth = 0;
-        let checkDate = new Date(bottomDate);
-        while (i + daysInMonth < totalDays && checkDate.getMonth() === currentMonth) {
-          daysInMonth += 1;
-          checkDate.setDate(checkDate.getDate() + 1);
-        }
-        bottomHeaders.push(
-          <div
-            key={`bot-m-${i}`}
-            className={`bg-white ${bottomHeaderBase} text-xs font-bold text-slate-600`}
-            style={{ width: `${daysInMonth * colWidth}px`, boxSizing: 'border-box' }}
-          >
-            {currentMonth + 1}월
-          </div>,
-        );
-        i += daysInMonth;
-        bottomDate = new Date(checkDate);
-      }
+      return bottomHeaders;
     }
 
-    return (
-      <div className="flex flex-col border-b border-indigo-100 bg-white/80 backdrop-blur-md shadow-sm">
-        <div className="flex h-9">{topHeaders}</div>
-        <div className="flex h-8">{bottomHeaders}</div>
-      </div>
-    );
+    let bottomDate = new Date(minDate);
+    for (let i = 0; i < totalDays;) {
+      const currentMonth = bottomDate.getMonth();
+      let daysInMonth = 0;
+      let checkDate = new Date(bottomDate);
+      while (i + daysInMonth < totalDays && checkDate.getMonth() === currentMonth) {
+        daysInMonth += 1;
+        checkDate.setDate(checkDate.getDate() + 1);
+      }
+      bottomHeaders.push(
+        <div
+          key={`bot-m-${i}`}
+          className={`bg-white ${bottomHeaderBase} text-xs font-bold text-slate-600`}
+          style={{ width: `${daysInMonth * colWidth}px`, boxSizing: 'border-box' }}
+        >
+          {currentMonth + 1}월
+        </div>,
+      );
+      i += daysInMonth;
+      bottomDate = new Date(checkDate);
+    }
+
+    return bottomHeaders;
   };
 
   const renderGridBackground = () => {
@@ -710,8 +696,10 @@ function GanttChart({
     );
   };
 
-  const headerEl = useMemo(
-    () => renderDoubleHeader(),
+  const topHeaderEl = useMemo(() => renderTopHeader(), [viewMode, totalDays, colWidth, minDate.getTime()]);
+
+  const bottomHeaderEl = useMemo(
+    () => renderBottomHeader(),
     [viewMode, totalDays, colWidth, minDate.getTime(), colStart, colEnd],
   );
 
@@ -726,12 +714,12 @@ function GanttChart({
   );
 
   const containerClass = isExportMode
-    ? 'bg-white border border-slate-200 flex flex-col'
-    : 'bg-white flex flex-col h-full';
+    ? 'bg-white border border-slate-200 flex min-w-0 flex-col'
+    : 'bg-white flex min-w-0 flex-col h-full';
 
   return (
     <div id={isExportMode ? exportId : 'gantt-main'} className={containerClass}>
-      <div className={`flex flex-1 ${isExportMode ? 'overflow-visible' : 'overflow-hidden'}`}>
+      <div className={`flex min-w-0 flex-1 ${isExportMode ? 'overflow-visible' : 'overflow-hidden'}`}>
         <div
           ref={leftPaneRef}
           className="border-r border-indigo-100 bg-white flex flex-col z-10 shadow-[4px_0_10px_-3px_rgba(0,0,0,0.05)]"
@@ -800,17 +788,22 @@ function GanttChart({
         </div>
 
         <div
-          className={isExportMode ? 'relative overflow-visible' : 'flex-1 relative overflow-hidden'}
+          className={isExportMode ? 'relative overflow-visible' : 'min-w-0 flex-1 relative overflow-hidden'}
           style={isExportMode ? { width: `${chartWidth}px` } : undefined}
         >
           {renderTodayOverlay()}
           <div
             ref={viewportRef}
             onScroll={syncLeftScroll}
-            className={`${isExportMode ? 'relative overflow-visible' : 'h-full w-full custom-scrollbar'} ${isExportMode ? '' : fitEnabled ? 'overflow-x-hidden overflow-y-auto' : 'overflow-auto'}`}
+            className={`${isExportMode ? 'relative overflow-visible' : 'h-full w-full min-w-0 custom-scrollbar'} ${isExportMode ? '' : fitEnabled ? 'overflow-x-hidden overflow-y-auto' : 'overflow-auto'}`}
           >
             <div style={{ width: `${chartWidth}px`, minWidth: '100%' }}>
-              <div className={isExportMode ? '' : 'gantt-header-sticky'}>{headerEl}</div>
+              <div className={isExportMode ? '' : 'gantt-header-sticky'}>
+                <div className="flex flex-col border-b border-indigo-100 bg-white/80 backdrop-blur-md shadow-sm">
+                  <div className="flex h-9">{topHeaderEl}</div>
+                  <div className="flex h-8">{bottomHeaderEl}</div>
+                </div>
+              </div>
 
               <div className="relative">
                 <div className="absolute inset-0 flex pointer-events-none z-0">{gridBackgroundEl}</div>
@@ -846,12 +839,13 @@ function GanttChart({
                   const left = offsetDays * colWidth;
                   const width = durationDays * colWidth;
 
-                  const todayDate = new Date();
-                  const endDate = new Date(e);
-                  todayDate.setHours(0, 0, 0, 0);
-                  endDate.setHours(0, 0, 0, 0);
-
-                  const isDelayed = todayDate > endDate && task.progress < 100;
+                  const endUtcMs = toUtcMidnightMs(e);
+                  const progressValue = Number.isFinite(Number(task.progress)) ? Number(task.progress) : 0;
+                  const isDelayed =
+                    Number.isFinite(endUtcMs) &&
+                    Number.isFinite(todayUtcMs) &&
+                    todayUtcMs > endUtcMs &&
+                    progressValue < 100;
 
                   let barClass =
                     'bg-gradient-to-r from-indigo-500 to-blue-500 shadow-md shadow-indigo-200 border border-indigo-400/20';
