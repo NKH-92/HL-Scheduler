@@ -1540,7 +1540,7 @@ function App() {
   }, [isUploadingPublicSchedule]);
 
   const uploadCurrentProject = useCallback(
-    async ({ title, mode = 'create', folderId, targetId, notificationRecipients } = {}) => {
+    async ({ title, mode = 'create', folderId, targetId, notificationRecipients, editorEmail } = {}) => {
       try {
         if (!isAuthenticated) {
           setIsAuthModalOpen(true);
@@ -1566,12 +1566,20 @@ function App() {
           return;
         }
 
+        const safeSelectedEditorEmail = String(editorEmail || '').trim().toLowerCase();
+        const safeAuthEmail = String(authUser?.email || '').trim().toLowerCase();
+        if (safeSelectedEditorEmail && safeAuthEmail && safeSelectedEditorEmail !== safeAuthEmail) {
+          void alertAsync(
+            `선택한 수정자(${safeSelectedEditorEmail})와 현재 로그인 계정(${safeAuthEmail})이 다릅니다.\n동일한 계정으로 선택 후 다시 시도해주세요.`,
+          );
+          return;
+        }
+
         const requestedMode = mode === 'update' ? 'update' : 'create';
         const safeMode = isSharedScheduleLocked ? 'update' : requestedMode;
         const safeFolderId = String(folderId || '').trim() || PUBLIC_UNCATEGORIZED_FOLDER_ID;
         const safeTargetId = isSharedScheduleLocked ? sharedScheduleId : String(targetId || '').trim();
         const safeNotificationRecipients = normalizeEmailList(notificationRecipients);
-        const knownRecipientsFromOrigin = normalizeEmailList(publicOrigin?.notificationRecipients || []);
 
         const knownFolderIds = new Set(
           (Array.isArray(publicFolderOptions) ? publicFolderOptions : []).map((item) => String(item?.id || '').trim()),
@@ -1581,17 +1589,18 @@ function App() {
           return;
         }
 
+        if (safeNotificationRecipients.length > MAX_NOTIFICATION_RECIPIENTS) {
+          void alertAsync(`알림 메일 주소는 최대 ${MAX_NOTIFICATION_RECIPIENTS}개까지 입력할 수 있습니다.`);
+          return;
+        }
+        if (safeNotificationRecipients.some((email) => !isValidEmail(email))) {
+          void alertAsync('유효하지 않은 알림 메일 주소가 포함되어 있습니다.');
+          return;
+        }
+
         if (safeMode === 'create') {
           if (safeNotificationRecipients.length === 0) {
             void alertAsync('알림을 받을 메일 주소를 1개 이상 입력해주세요.');
-            return;
-          }
-          if (safeNotificationRecipients.length > MAX_NOTIFICATION_RECIPIENTS) {
-            void alertAsync(`알림 메일 주소는 최대 ${MAX_NOTIFICATION_RECIPIENTS}개까지 입력할 수 있습니다.`);
-            return;
-          }
-          if (safeNotificationRecipients.some((email) => !isValidEmail(email))) {
-            void alertAsync('유효하지 않은 알림 메일 주소가 포함되어 있습니다.');
             return;
           }
         }
@@ -1603,7 +1612,7 @@ function App() {
           }
         }
 
-        let updateRecipients = safeMode === 'update' ? knownRecipientsFromOrigin : [];
+        let updateRecipients = safeMode === 'update' ? safeNotificationRecipients : [];
 
         let ifUnmodifiedAt = null;
         if (safeMode === 'update') {
@@ -1617,7 +1626,7 @@ function App() {
               const latestRecipients = normalizeEmailList(
                 latest?.notificationRecipients || latest?.data?.notificationRecipients || [],
               );
-              if (latestRecipients.length > 0) updateRecipients = latestRecipients;
+              if (updateRecipients.length === 0 && latestRecipients.length > 0) updateRecipients = latestRecipients;
             } catch {
               // keep null and let server handle the request
             }
@@ -1770,6 +1779,7 @@ function App() {
       publicFolderOptions,
       alertAsync,
       isAuthenticated,
+      authUser?.email,
       canEditSchedules,
       canWritePublicSchedules,
       isSharedScheduleLocked,
@@ -1932,6 +1942,7 @@ function App() {
         currentUserProfile={authEmployeeProfile}
         defaultFolderId={String(publicOrigin?.folderId || '').trim() || PUBLIC_UNCATEGORIZED_FOLDER_ID}
         folderOptions={publicFolderOptions}
+        employeeDirectory={employeeDirectory}
         tasksCount={tasks.length}
         isUploading={isUploadingPublicSchedule || isLoadingPublicFolders}
         lockModeToUpdate={isSharedScheduleLocked}
