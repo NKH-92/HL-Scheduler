@@ -146,26 +146,32 @@ function AppHeader({
                 </div>
               )}
 
-              {isEditMode && (
-                <>
-                  <button
-                    onClick={onSaveProject}
-                    className="rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-700"
-                    title="프로젝트 백업(JSON)"
-                    type="button"
-                  >
-                    <Save size={18} />
-                  </button>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-700"
-                    title="프로젝트 불러오기(JSON)"
-                    type="button"
-                  >
-                    <Download size={18} />
-                  </button>
-                </>
-              )}
+              <div className="flex w-[84px] items-center justify-end gap-2">
+                <button
+                  onClick={onSaveProject}
+                  className={`rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-700 ${
+                    isEditMode ? '' : 'pointer-events-none invisible'
+                  }`}
+                  title="프로젝트 백업(JSON)"
+                  type="button"
+                  aria-hidden={!isEditMode}
+                  tabIndex={isEditMode ? 0 : -1}
+                >
+                  <Save size={18} />
+                </button>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-700 ${
+                    isEditMode ? '' : 'pointer-events-none invisible'
+                  }`}
+                  title="프로젝트 불러오기(JSON)"
+                  type="button"
+                  aria-hidden={!isEditMode}
+                  tabIndex={isEditMode ? 0 : -1}
+                >
+                  <Download size={18} />
+                </button>
+              </div>
 
               <input type="file" ref={fileInputRef} onChange={onImportFile} className="hidden" accept=".json" />
             </div>
@@ -186,60 +192,68 @@ function AppHeader({
             </select>
           </div>
 
-          {isEditMode && (
-            <>
-              <nav className="hidden items-center rounded-2xl border border-slate-200/70 bg-slate-50/80 p-1 md:flex">
-                <TabButton
-                  active={activeEditorTab === 'tasks'}
-                  onClick={() => onEditorTabChange('tasks')}
-                  icon={<CheckSquare size={16} />}
-                  label="작업 관리"
-                />
-                <TabButton
-                  active={activeEditorTab === 'schedule'}
-                  onClick={() => onEditorTabChange('schedule')}
-                  icon={<CalendarIcon size={16} />}
-                  label="간트 / 일정"
-                />
-                <TabButton
-                  active={activeEditorTab === 'dashboard'}
-                  onClick={() => onEditorTabChange('dashboard')}
-                  icon={<BarChart2 size={16} />}
-                  label="대시보드"
-                />
-                <TabButton
-                  active={activeEditorTab === 'help'}
-                  onClick={() => onEditorTabChange('help')}
-                  icon={<Info size={16} />}
-                  label="도움말"
-                />
-                <TabButton
-                  active={activeEditorTab === 'revisions'}
-                  onClick={() => onEditorTabChange('revisions')}
-                  icon={<FileText size={16} />}
-                  label="개정이력"
-                />
-              </nav>
+          <div className="hidden md:block">
+            <nav
+              className={`items-center rounded-2xl border border-slate-200/70 bg-slate-50/80 p-1 md:flex ${
+                isEditMode ? '' : 'pointer-events-none invisible'
+              }`}
+              aria-hidden={!isEditMode}
+            >
+              <TabButton
+                active={activeEditorTab === 'tasks'}
+                onClick={() => onEditorTabChange('tasks')}
+                icon={<CheckSquare size={16} />}
+                label="작업 관리"
+              />
+              <TabButton
+                active={activeEditorTab === 'schedule'}
+                onClick={() => onEditorTabChange('schedule')}
+                icon={<CalendarIcon size={16} />}
+                label="간트 / 일정"
+              />
+              <TabButton
+                active={activeEditorTab === 'dashboard'}
+                onClick={() => onEditorTabChange('dashboard')}
+                icon={<BarChart2 size={16} />}
+                label="대시보드"
+              />
+              <TabButton
+                active={activeEditorTab === 'help'}
+                onClick={() => onEditorTabChange('help')}
+                icon={<Info size={16} />}
+                label="도움말"
+              />
+              <TabButton
+                active={activeEditorTab === 'revisions'}
+                onClick={() => onEditorTabChange('revisions')}
+                icon={<FileText size={16} />}
+                label="개정이력"
+              />
+            </nav>
+          </div>
 
-              <div className="md:hidden">
-                <label className="sr-only" htmlFor="mobile-editor-tab-select">
-                  편집 탭
-                </label>
-                <select
-                  id="mobile-editor-tab-select"
-                  value={activeEditorTab}
-                  onChange={(e) => onEditorTabChange(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                >
-                  <option value="tasks">작업 관리</option>
-                  <option value="schedule">간트 / 일정</option>
-                  <option value="dashboard">대시보드</option>
-                  <option value="help">도움말</option>
-                  <option value="revisions">개정이력</option>
-                </select>
-              </div>
-            </>
-          )}
+          <div className="md:hidden">
+            <label className="sr-only" htmlFor="mobile-editor-tab-select">
+              편집 탭
+            </label>
+            <select
+              id="mobile-editor-tab-select"
+              value={isEditMode ? activeEditorTab : 'tasks'}
+              onChange={(e) => onEditorTabChange(e.target.value)}
+              disabled={!isEditMode}
+              className={`w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 ${
+                isEditMode ? '' : 'pointer-events-none invisible'
+              }`}
+              aria-hidden={!isEditMode}
+              tabIndex={isEditMode ? 0 : -1}
+            >
+              <option value="tasks">작업 관리</option>
+              <option value="schedule">간트 / 일정</option>
+              <option value="dashboard">대시보드</option>
+              <option value="help">도움말</option>
+              <option value="revisions">개정이력</option>
+            </select>
+          </div>
         </div>
       </div>
     </header>

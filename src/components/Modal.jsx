@@ -118,20 +118,19 @@ function Modal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 z-0 bg-slate-900/35"
-        onClick={closeOnOverlay ? onClose : undefined}
-      />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={ariaLabel}
-        tabIndex={-1}
-        className={`relative z-10 ${panelClassName}`}
-      >
-        {children}
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 z-0 bg-slate-900/35" onClick={closeOnOverlay ? onClose : undefined} />
+      <div className="relative z-10 flex min-h-full items-start justify-center overflow-y-auto p-4 sm:items-center">
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={ariaLabel}
+          tabIndex={-1}
+          className={`w-full max-h-[calc(100dvh-2rem)] overflow-y-auto custom-scrollbar ${panelClassName}`}
+        >
+          {children}
+        </div>
       </div>
     </div>
   );

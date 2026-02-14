@@ -520,17 +520,6 @@ function PublicSchedules({
           >
             <span className="font-semibold">전체</span>
           </button>
-          {supportsFolders && (
-            <button
-              type="button"
-              onClick={() => setSelectedFolderId(PUBLIC_UNCATEGORIZED_FOLDER_ID)}
-              className={`mb-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
-                selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <span>미분류</span>
-            </button>
-          )}
           {supportsFolders &&
             folders.map((folder) => (
               <button
@@ -546,6 +535,17 @@ function PublicSchedules({
                 <span className="text-[11px] text-slate-400">{folder.projectCount}</span>
               </button>
             ))}
+          {supportsFolders && (
+            <button
+              type="button"
+              onClick={() => setSelectedFolderId(PUBLIC_UNCATEGORIZED_FOLDER_ID)}
+              className={`mb-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
+                selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <span>미분류</span>
+            </button>
+          )}
         </div>
 
         <div className="border-t border-slate-200/70 px-4 py-3">
