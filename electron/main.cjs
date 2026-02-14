@@ -3,7 +3,6 @@ const { fileURLToPath } = require('url');
 const fsSync = require('fs');
 const fs = require('fs/promises');
 const { app, BrowserWindow, Menu, shell, ipcMain, dialog } = require('electron');
-const nodemailer = require('nodemailer');
 
 const isDev = !app.isPackaged;
 const devServerUrl = process.env.ELECTRON_RENDERER_URL;
@@ -105,55 +104,6 @@ const parseImageDataUrl = (dataUrl) => {
   return { mime: match[1].toLowerCase(), buffer: Buffer.from(match[3], 'base64') };
 };
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const SMTP_HOST = String(process.env.HL_SCHEDULER_SMTP_HOST || 'omail.hanlim.com').trim() || 'omail.hanlim.com';
-const SMTP_PORT = Math.max(1, Math.min(65535, Number(process.env.HL_SCHEDULER_SMTP_PORT) || 25));
-const SMTP_SECURE = String(process.env.HL_SCHEDULER_SMTP_SECURE || 'false').trim().toLowerCase() === 'true';
-const MAX_NOTIFICATION_RECIPIENTS = 50;
-
-const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
-const isValidEmail = (value) => EMAIL_PATTERN.test(normalizeEmail(value));
-const normalizeEmailList = (value) => {
-  const source = Array.isArray(value) ? value : [];
-  const unique = new Set();
-  const result = [];
-  source.forEach((item) => {
-    const email = normalizeEmail(item);
-    if (!email || unique.has(email)) return;
-    unique.add(email);
-    result.push(email);
-  });
-  return result;
-};
-
-const formatKstDateTime = (value) => {
-  const date = typeof value === 'number' ? new Date(value) : new Date(String(value || ''));
-  if (Number.isNaN(date.getTime())) return String(value || '');
-  return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: 'Asia/Seoul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(date);
-};
-
-let smtpTransporter;
-const getSmtpTransporter = () => {
-  if (!smtpTransporter) {
-    smtpTransporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: SMTP_PORT,
-      secure: SMTP_SECURE,
-      auth: undefined,
-    });
-  }
-  return smtpTransporter;
-};
-
 const escapeHtml = (value) =>
   String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -167,10 +117,10 @@ const showLoadFailure = async (mainWindow, error) => {
   const html = `<!doctype html><meta charset="utf-8" />
     <title>Scheduler - Load Failed</title>
     <body style="font-family: ui-sans-serif, system-ui; padding: 16px;">
-      <h2 style="margin: 0 0 12px 0;">앱을 불러오지 못했습니다.</h2>
-      <p style="margin: 0 0 12px 0;">아래 오류 내용을 확인해주세요.</p>
+      <h2 style="margin: 0 0 12px 0;">?�을 불러?��? 못했?�니??</h2>
+      <p style="margin: 0 0 12px 0;">?�래 ?�류 ?�용???�인?�주?�요.</p>
       <pre style="white-space: pre-wrap; background: #f1f5f9; padding: 12px; border-radius: 8px;">${details}</pre>
-      <p style="margin: 12px 0 0 0; color: #475569;">로그 파일: ${escapeHtml(logFilePath || '(unknown)')}</p>
+      <p style="margin: 12px 0 0 0; color: #475569;">로그 ?�일: ${escapeHtml(logFilePath || '(unknown)')}</p>
     </body>`;
   await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 };
@@ -252,65 +202,6 @@ ipcMain.handle('scheduler:set-zoom-factor', (event, payload) => {
   return { zoomFactor: win.webContents.getZoomFactor() };
 });
 
-ipcMain.handle('scheduler:send-update-email', async (_event, payload) => {
-  const projectName = String(payload?.projectName || '').trim();
-  const updatedAt = payload?.updatedAt ?? new Date().toISOString();
-  const fromEmail = normalizeEmail(payload?.fromEmail);
-  const recipients = normalizeEmailList(payload?.recipients);
-
-  if (!projectName) throw new Error('projectName is required.');
-  if (!fromEmail || !isValidEmail(fromEmail)) throw new Error('fromEmail is required and must be a valid email.');
-  if (recipients.length === 0) throw new Error('recipients must include at least one valid email.');
-  if (recipients.length > MAX_NOTIFICATION_RECIPIENTS) {
-    throw new Error(`Too many recipients (max ${MAX_NOTIFICATION_RECIPIENTS}).`);
-  }
-
-  const invalidRecipient = recipients.find((email) => !isValidEmail(email));
-  if (invalidRecipient) throw new Error(`Invalid recipient email: ${invalidRecipient}`);
-
-  const subject = `[Scheduler] 일정 업데이트 알림 - ${projectName}`;
-  const text = [
-    '일정이 업데이트되었습니다.',
-    '',
-    `[프로젝트명]: ${projectName}`,
-    `[수정자]: ${fromEmail}`,
-    `[수정시각]: ${formatKstDateTime(updatedAt)}`,
-    '',
-    '감사합니다.',
-  ].join('\n');
-
-  try {
-    const info = await getSmtpTransporter().sendMail({
-      from: fromEmail,
-      to: recipients.join(','),
-      subject,
-      text,
-    });
-    log('send-update-email success', {
-      fromEmail,
-      recipientCount: recipients.length,
-      messageId: info?.messageId ?? null,
-      smtpHost: SMTP_HOST,
-      smtpPort: SMTP_PORT,
-      smtpSecure: SMTP_SECURE,
-    });
-    return {
-      ok: true,
-      recipientCount: recipients.length,
-      messageId: info?.messageId ?? null,
-    };
-  } catch (error) {
-    log('send-update-email failed', {
-      error: toLogString(error),
-      fromEmail,
-      recipientCount: recipients.length,
-      smtpHost: SMTP_HOST,
-      smtpPort: SMTP_PORT,
-      smtpSecure: SMTP_SECURE,
-    });
-    throw new Error(`메일 발송 실패: ${error?.message || String(error)}`);
-  }
-});
 
 const createMainWindow = async () => {
   try {

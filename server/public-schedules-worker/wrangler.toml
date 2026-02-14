@@ -4,7 +4,6 @@ compatibility_date = "2025-02-01"
 
 # Optional secrets:
 #   wrangler secret put PASSWORD_PEPPER
-#   wrangler secret put RESEND_API_KEY
 # Required for production:
 #   - never store real keys in this file
 #   - use Cloudflare Access + ALLOWED_ADMIN_EMAILS for admin worker

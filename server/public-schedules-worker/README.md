@@ -26,7 +26,6 @@ This worker provides public schedule read APIs and admin write APIs for HL-Sched
 
 `secrets`
 
-- `RESEND_API_KEY` (required for update email send)
 - `UPLOAD_KEY` (optional extra write token)
 - `FOLDER_ADMIN_KEY` (optional folder admin key)
 
@@ -71,10 +70,6 @@ wrangler.cmd d1 execute hl-scheduler --file=./schema.sql --remote
 ```
 
 5. Set secrets
-
-```bash
-wrangler.cmd secret put RESEND_API_KEY
-```
 
 Optional:
 

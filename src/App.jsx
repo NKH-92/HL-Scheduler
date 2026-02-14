@@ -41,7 +41,6 @@ import {
   updatePublicSchedule,
   uploadPublicSchedule,
 } from './utils/publicSchedulesApi';
-import { isValidEmail, normalizeEmailList } from './utils/email';
 import { findEmployeeByEmail, getEmployeeDirectory } from './utils/employeeDirectory';
 
 const escapeHtml = (value) =>
@@ -60,7 +59,6 @@ const sanitizeFileName = (value, fallback) => {
 const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
 const MAX_IMPORT_TASKS = 5000;
 const MAX_IMPORT_VACATIONS = 2000;
-const MAX_NOTIFICATION_RECIPIENTS = 50;
 const MAX_PUBLIC_UPLOAD_TEXT_LENGTH = 1024 * 1024;
 let imageExportLibsPromise = null;
 
@@ -1325,7 +1323,6 @@ function App() {
         sourceName,
         sourceId,
         sourceUpdatedAt,
-        sourceNotificationRecipients,
         sourceFolderId,
         sourceFolderPath,
         skipConfirm = false,
@@ -1341,7 +1338,6 @@ function App() {
         if (!imported) return;
         const safeSourceId = String(sourceId || '').trim();
         const safeUpdatedAt = Number(sourceUpdatedAt);
-        const safeNotificationRecipients = normalizeEmailList(sourceNotificationRecipients);
         const safeFolderIdRaw = String(sourceFolderId || '').trim();
         const safeFolderPath = String(sourceFolderPath || '').trim();
         setPublicOrigin(
@@ -1350,7 +1346,6 @@ function App() {
                 id: safeSourceId,
                 name: String(sourceName || '').trim(),
                 updatedAt: Number.isFinite(safeUpdatedAt) ? safeUpdatedAt : null,
-                notificationRecipients: safeNotificationRecipients,
                 folderId: safeFolderIdRaw || PUBLIC_UNCATEGORIZED_FOLDER_ID,
                 folderPath: safeFolderPath,
               }
@@ -1397,7 +1392,6 @@ function App() {
           sourceName,
           sourceId: sharedScheduleId,
           sourceUpdatedAt: raw?.updatedAt ?? raw?.updated_at ?? null,
-          sourceNotificationRecipients: raw?.notificationRecipients || raw?.data?.notificationRecipients || [],
           sourceFolderId: raw?.folderId ?? raw?.folder_id ?? null,
           sourceFolderPath: raw?.folderPath ?? raw?.folder_path ?? '',
           skipConfirm: true,
@@ -1556,7 +1550,7 @@ function App() {
   }, [isUploadingPublicSchedule]);
 
   const uploadCurrentProject = useCallback(
-    async ({ title, mode = 'create', folderId, targetId, notificationRecipients } = {}) => {
+    async ({ title, mode = 'create', folderId, targetId } = {}) => {
       try {
         if (!isAuthenticated) {
           setIsAuthModalOpen(true);
@@ -1586,7 +1580,6 @@ function App() {
         const safeMode = isSharedScheduleLocked ? 'update' : requestedMode;
         const safeFolderId = String(folderId || '').trim() || PUBLIC_UNCATEGORIZED_FOLDER_ID;
         const safeTargetId = isSharedScheduleLocked ? sharedScheduleId : String(targetId || '').trim();
-        const safeNotificationRecipients = normalizeEmailList(notificationRecipients);
 
         const knownFolderIds = new Set(
           (Array.isArray(publicFolderOptions) ? publicFolderOptions : []).map((item) => String(item?.id || '').trim()),
@@ -1596,30 +1589,12 @@ function App() {
           return;
         }
 
-        if (safeNotificationRecipients.length > MAX_NOTIFICATION_RECIPIENTS) {
-          void alertAsync(`알림 메일 주소는 최대 ${MAX_NOTIFICATION_RECIPIENTS}개까지 입력할 수 있습니다.`);
-          return;
-        }
-        if (safeNotificationRecipients.some((email) => !isValidEmail(email))) {
-          void alertAsync('유효하지 않은 알림 메일 주소가 포함되어 있습니다.');
-          return;
-        }
-
-        if (safeMode === 'create') {
-          if (safeNotificationRecipients.length === 0) {
-            void alertAsync('알림을 받을 메일 주소를 1개 이상 입력해주세요.');
-            return;
-          }
-        }
-
         if (safeMode === 'update') {
           if (!safeTargetId) {
             void alertAsync('업데이트할 일정 ID(또는 링크)를 입력해주세요.');
             return;
           }
         }
-
-        let updateRecipients = safeMode === 'update' ? safeNotificationRecipients : [];
 
         let ifUnmodifiedAt = null;
         if (safeMode === 'update') {
@@ -1630,10 +1605,6 @@ function App() {
               const latest = await getPublicSchedule(safeTargetId);
               const latestUpdatedAt = Number(latest?.updatedAt ?? latest?.updated_at);
               if (Number.isFinite(latestUpdatedAt)) ifUnmodifiedAt = latestUpdatedAt;
-              const latestRecipients = normalizeEmailList(
-                latest?.notificationRecipients || latest?.data?.notificationRecipients || [],
-              );
-              if (updateRecipients.length === 0 && latestRecipients.length > 0) updateRecipients = latestRecipients;
             } catch {
               // keep null and let server handle the request
             }
@@ -1649,8 +1620,6 @@ function App() {
           fitSettings,
           zoomSettings,
           uploadedAt: new Date().toISOString(),
-          ...(safeMode === 'create' ? { notificationRecipients: safeNotificationRecipients } : {}),
-          ...(safeMode === 'update' && updateRecipients.length > 0 ? { notificationRecipients: updateRecipients } : {}),
           ...(safeMode === 'update' && Number.isFinite(ifUnmodifiedAt) ? { ifUnmodifiedAt } : {}),
         };
 
@@ -1683,45 +1652,18 @@ function App() {
 
         const shareUrl = String(result?.url || '').trim();
         const nextUpdatedAt = Number(result?.updatedAt ?? result?.updated_at);
-        const mergedNotificationRecipients = normalizeEmailList(
-          safeMode === 'create'
-            ? safeNotificationRecipients
-            : result?.notificationRecipients || updateRecipients || publicOrigin?.notificationRecipients || [],
-        );
-
-        const effectiveNotification = result?.notification || null;
-
-        const notificationStatus = String(effectiveNotification?.status || '');
-        const notifiedCount = Number(effectiveNotification?.recipientCount);
-        const notificationReason = String(effectiveNotification?.reason || '').trim();
-        const notificationNotice =
-          safeMode !== 'update'
-            ? ''
-            : notificationStatus === 'sent'
-              ? `\n\n알림 메일이 ${Number.isFinite(notifiedCount) ? notifiedCount : 0}명에게 발송되었습니다.`
-              : notificationStatus === 'failed'
-                ? `\n\n일정은 업데이트되었지만 알림 메일 발송에 실패했습니다.${notificationReason ? `\n사유: ${notificationReason}` : ''}`
-                : notificationStatus === 'skipped'
-                  ? `\n\n일정은 업데이트되었지만 알림 메일을 보내지 않았습니다.${
-                      notificationReason
-                        ? `\n사유: ${notificationReason}`
-                        : Number.isFinite(notifiedCount) && notifiedCount === 0
-                          ? '\n사유: 등록된 알림 대상 메일이 없습니다.'
-                          : ''
-                    }`
-                  : '';
 
         if (shareUrl) {
           try {
             if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
             await navigator.clipboard.writeText(shareUrl);
             await alertAsync(
-              `${safeMode === 'update' ? '업데이트' : '업로드'}가 완료되었습니다.${notificationNotice}\n\n링크가 클립보드에 복사되었습니다:\n${shareUrl}`,
+              `${safeMode === 'update' ? '업데이트' : '업로드'}가 완료되었습니다.\n\n링크가 클립보드에 복사되었습니다:\n${shareUrl}`,
               { title: '완료', confirmText: '확인' },
             );
           } catch {
             await alertAsync(
-              `${safeMode === 'update' ? '업데이트' : '업로드'}가 완료되었습니다.${notificationNotice}\n\n링크:\n${shareUrl}`,
+              `${safeMode === 'update' ? '업데이트' : '업로드'}가 완료되었습니다.\n\n링크:\n${shareUrl}`,
               {
                 title: '완료',
                 confirmText: '확인',
@@ -1729,7 +1671,7 @@ function App() {
             );
           }
         } else {
-          await alertAsync(`${safeMode === 'update' ? '업데이트' : '업로드'}가 완료되었습니다.${notificationNotice}`, {
+          await alertAsync(`${safeMode === 'update' ? '업데이트' : '업로드'}가 완료되었습니다.`, {
             title: '완료',
             confirmText: '확인',
           });
@@ -1751,7 +1693,6 @@ function App() {
                   : Number.isFinite(ifUnmodifiedAt)
                     ? ifUnmodifiedAt
                     : null,
-                notificationRecipients: mergedNotificationRecipients,
                 folderId: nextFolderId,
                 folderPath: nextFolderPath,
               }
@@ -1943,12 +1884,10 @@ function App() {
         defaultTitle={String(projectName || '').trim()}
         defaultUpdateTargetId={isSharedScheduleLocked ? sharedScheduleId : String(publicOrigin?.id || '').trim()}
         defaultUpdateTargetName={String(publicOrigin?.name || '').trim()}
-        defaultNotificationRecipients={publicOrigin?.notificationRecipients || []}
         currentUserEmail={authUser?.email || ''}
         currentUserProfile={authEmployeeProfile}
         defaultFolderId={String(publicOrigin?.folderId || '').trim() || PUBLIC_UNCATEGORIZED_FOLDER_ID}
         folderOptions={publicFolderOptions}
-        employeeDirectory={employeeDirectory}
         tasksCount={tasks.length}
         isUploading={isUploadingPublicSchedule || isLoadingPublicFolders}
         lockModeToUpdate={isSharedScheduleLocked}

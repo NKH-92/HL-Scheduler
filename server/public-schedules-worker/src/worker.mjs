@@ -3,7 +3,6 @@ const CORS_ALLOW_HEADERS =
   'Content-Type, X-Upload-Key, X-Folder-Admin-Key, Authorization, CF-Access-Authenticated-User-Email';
 const CORS_MAX_AGE = '86400';
 
-const MAX_NOTIFICATION_RECIPIENTS = 50;
 const MAX_FOLDER_DEPTH = 4;
 const MAX_FOLDER_NAME_LENGTH = 40;
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
@@ -73,12 +72,6 @@ const parseJsonSafe = (text) => {
   } catch {
     return null;
   }
-};
-
-const readJsonBodySafe = async (response) => {
-  const text = await response.text();
-  if (!text) return null;
-  return parseJsonSafe(text) ?? text;
 };
 
 const readJsonObjectBody = async (request, { maxBytes = MAX_JSON_BODY_BYTES } = {}) => {
@@ -390,14 +383,6 @@ const getEmailDomain = (email) => {
   return normalized.slice(at + 1);
 };
 
-const validateAllowedFromDomain = (email, env) => {
-  const expectedDomain = String(env.ALLOWED_FROM_DOMAIN || '').trim().toLowerCase();
-  if (!expectedDomain) return { ok: true };
-  const actualDomain = getEmailDomain(email);
-  if (actualDomain === expectedDomain) return { ok: true };
-  return { ok: false, message: `updatedByEmail must use @${expectedDomain}.` };
-};
-
 const buildUserPermissions = (user) => {
   const status = String(user?.status || '');
   const isApproved = status === STATUS_APPROVED;
@@ -511,34 +496,6 @@ const revokeSessionsForUser = async (env, userId) => {
     .bind(timestamp, String(userId || '').trim())
     .run();
 };
-
-const formatKstDateTime = (value) => {
-  const date = typeof value === 'number' ? new Date(value) : new Date(String(value || ''));
-  if (Number.isNaN(date.getTime())) return String(value || '');
-  return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: 'Asia/Seoul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(date);
-};
-
-const buildSubject = (projectName) => `[Scheduler] Schedule update notification - ${projectName}`;
-
-const buildPlainText = ({ projectName, updatedByEmail, updatedAt }) =>
-  [
-    'A schedule has been updated.',
-    '',
-    `[Project]: ${projectName}`,
-    `[Updated by]: ${updatedByEmail}`,
-    `[Updated at]: ${formatKstDateTime(updatedAt)}`,
-    '',
-    'Regards.',
-  ].join('\n');
 
 const ensureNotReadOnly = (env) => {
   if (parseBoolean(env.READ_ONLY_MODE, false)) {
@@ -829,11 +786,6 @@ const collectDescendantFolderIds = (folderId, childrenByParent) => {
   return result;
 };
 
-const extractNotificationRecipients = (data) => {
-  if (!isPlainObject(data)) return [];
-  return normalizeEmailList(data.notificationRecipients);
-};
-
 const scheduleRowToSummary = (row, pathById) => {
   const folderId = normalizeFolderId(row?.folder_id ?? row?.folderId);
   return {
@@ -854,7 +806,6 @@ const scheduleRowToDetail = (row, pathById, request) => {
   const folderId = normalizeFolderId(row?.folder_id ?? row?.folderId);
   const parsedData = parseJsonSafe(String(row?.data || ''));
   const data = parsedData ?? row?.data ?? null;
-  const recipients = extractNotificationRecipients(data);
   const id = String(row?.id || '').trim();
 
   return {
@@ -869,77 +820,8 @@ const scheduleRowToDetail = (row, pathById, request) => {
     updatedByEmail: normalizeEmail(row?.updated_by_email ?? row?.updatedByEmail),
     createdAt: toSafeTimestamp(row?.created_at ?? row?.createdAt),
     updatedAt: toSafeTimestamp(row?.updated_at ?? row?.updatedAt),
-    notificationRecipients: recipients,
     url: buildScheduleUrl(request, id),
   };
-};
-
-const sendUpdateNotificationByResend = async ({
-  env,
-  projectName,
-  updatedByEmail,
-  updatedAt,
-  recipients,
-}) => {
-  const safeRecipients = normalizeEmailList(recipients);
-  if (safeRecipients.length === 0) {
-    return {
-      status: 'skipped',
-      reason: 'No notification recipients are configured.',
-      recipientCount: 0,
-    };
-  }
-
-  const resendApiKey = String(env.RESEND_API_KEY || '').trim();
-  if (!resendApiKey) {
-    return {
-      status: 'failed',
-      reason: 'RESEND_API_KEY is not configured.',
-      recipientCount: safeRecipients.length,
-    };
-  }
-
-  try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: updatedByEmail,
-        to: safeRecipients,
-        subject: buildSubject(projectName),
-        text: buildPlainText({ projectName, updatedByEmail, updatedAt }),
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await readJsonBodySafe(response);
-      const reason =
-        (typeof errorData === 'object' && errorData
-          ? errorData.message || errorData.error
-          : typeof errorData === 'string'
-            ? errorData
-            : '') || `Resend request failed (${response.status}).`;
-      return {
-        status: 'failed',
-        reason: String(reason),
-        recipientCount: safeRecipients.length,
-      };
-    }
-
-    return {
-      status: 'sent',
-      recipientCount: safeRecipients.length,
-    };
-  } catch (error) {
-    return {
-      status: 'failed',
-      reason: error?.message || 'Resend request failed.',
-      recipientCount: safeRecipients.length,
-    };
-  }
 };
 
 const parseScheduleWritePayload = (payload, existingData = null) => {
@@ -962,44 +844,17 @@ const parseScheduleWritePayload = (payload, existingData = null) => {
   };
 
   const folderId = normalizeFolderId(payload.folderId ?? existingData?.folderId ?? null);
-  const notificationRecipients = Object.prototype.hasOwnProperty.call(payload, 'notificationRecipients')
-    ? normalizeEmailList(payload.notificationRecipients)
-    : normalizeEmailList(existingData?.notificationRecipients || []);
-
   return {
     ok: true,
     name: safeName,
     tasks,
     vacations,
     folderId,
-    notificationRecipients,
     data: {
       ...nextData,
       folderId,
-      notificationRecipients,
     },
   };
-};
-
-const validateRecipientsForCreate = (recipients) => {
-  if (recipients.length === 0) return 'notificationRecipients must include at least one valid email.';
-  if (recipients.length > MAX_NOTIFICATION_RECIPIENTS) {
-    return `Too many notificationRecipients (max ${MAX_NOTIFICATION_RECIPIENTS}).`;
-  }
-  if (recipients.some((email) => !isValidEmail(email))) {
-    return 'notificationRecipients contains invalid email.';
-  }
-  return '';
-};
-
-const validateRecipientsForUpdate = (recipients) => {
-  if (recipients.length > MAX_NOTIFICATION_RECIPIENTS) {
-    return `Too many notificationRecipients (max ${MAX_NOTIFICATION_RECIPIENTS}).`;
-  }
-  if (recipients.some((email) => !isValidEmail(email))) {
-    return 'notificationRecipients contains invalid email.';
-  }
-  return '';
 };
 
 const createAuthSession = async (env, userId) => {
@@ -1396,9 +1251,6 @@ const handleCreateSchedule = async (request, env) => {
   const parsed = parseScheduleWritePayload(payload, null);
   if (!parsed.ok) return errorResponse(parsed.message, { status: 400 });
 
-  const recipientsError = validateRecipientsForCreate(parsed.notificationRecipients);
-  if (recipientsError) return errorResponse(recipientsError, { status: 400 });
-
   if (parsed.folderId != null) {
     const folderExists = await ensureFolderExists(env.DB, parsed.folderId);
     if (!folderExists) return errorResponse('folderId does not exist.', { status: 400 });
@@ -1406,8 +1258,6 @@ const handleCreateSchedule = async (request, env) => {
 
   const createdByEmail = actor.email;
   const updatedByEmail = actor.email;
-  const fromDomainCheck = validateAllowedFromDomain(createdByEmail, env);
-  if (!fromDomainCheck.ok) return errorResponse(fromDomainCheck.message, { status: 400 });
 
   const id = crypto.randomUUID();
   const timestamp = nowMs();
@@ -1455,12 +1305,6 @@ const handleCreateSchedule = async (request, env) => {
       folderPath: parsed.folderId ? String(folderContext.pathById.get(parsed.folderId) || '') : '',
       createdByEmail,
       updatedByEmail,
-      notificationRecipients: parsed.notificationRecipients,
-      notification: {
-        status: 'skipped',
-        reason: 'Notification is sent on updates only.',
-        recipientCount: parsed.notificationRecipients.length,
-      },
     },
     { status: 201 },
   );
@@ -1501,17 +1345,12 @@ const handleUpdateSchedule = async (request, env, id) => {
   const parsed = parseScheduleWritePayload(payload, isPlainObject(existingData) ? existingData : null);
   if (!parsed.ok) return errorResponse(parsed.message, { status: 400 });
 
-  const recipientsError = validateRecipientsForUpdate(parsed.notificationRecipients);
-  if (recipientsError) return errorResponse(recipientsError, { status: 400 });
-
   if (parsed.folderId != null) {
     const folderExists = await ensureFolderExists(env.DB, parsed.folderId);
     if (!folderExists) return errorResponse('folderId does not exist.', { status: 400 });
   }
 
   const updatedByEmail = actor.email;
-  const fromDomainCheck = validateAllowedFromDomain(actor.email, env);
-  if (!fromDomainCheck.ok) return errorResponse(fromDomainCheck.message, { status: 400 });
 
   const expectedUnmodifiedAt = toSafeTimestamp(payload.ifUnmodifiedAt);
   const previousUpdatedAt = toSafeTimestamp(existingRow.updated_at ?? existingRow.updatedAt);
@@ -1550,14 +1389,6 @@ const handleUpdateSchedule = async (request, env, id) => {
     return errorResponse('Failed to update schedule.', { status: 500 });
   }
 
-  const notification = await sendUpdateNotificationByResend({
-    env,
-    projectName: parsed.name,
-    updatedByEmail,
-    updatedAt: timestamp,
-    recipients: parsed.notificationRecipients,
-  });
-
   const folderContext = await buildFolderContext(env.DB);
   return jsonResponse({
     id,
@@ -1570,8 +1401,6 @@ const handleUpdateSchedule = async (request, env, id) => {
     folderPath: parsed.folderId ? String(folderContext.pathById.get(parsed.folderId) || '') : '',
     createdByEmail,
     updatedByEmail,
-    notificationRecipients: parsed.notificationRecipients,
-    notification,
   });
 };
 

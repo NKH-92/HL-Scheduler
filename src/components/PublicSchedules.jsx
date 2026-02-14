@@ -14,7 +14,6 @@ import {
 } from '../utils/publicSchedulesApi';
 import { normalizeTasks, normalizeVacations } from '../utils/data';
 import { mergeRangePadding, sanitizeFitSettings, sanitizeZoomSettings } from '../utils/schedulerSettings';
-import { normalizeEmailList } from '../utils/email';
 
 const ALL_FOLDERS_ID = '__all_folders__';
 const PAGE_SIZE = 40;
@@ -37,7 +36,6 @@ const normalizeSchedulePayload = (payload, fallbackName) => {
       rangePadding: mergeRangePadding(null),
       fitSettings: sanitizeFitSettings(null),
       zoomSettings: sanitizeZoomSettings(null),
-      notificationRecipients: [],
     };
   }
 
@@ -52,7 +50,6 @@ const normalizeSchedulePayload = (payload, fallbackName) => {
     rangePadding: mergeRangePadding(payload.rangePadding),
     fitSettings: sanitizeFitSettings(payload.fitSettings),
     zoomSettings: sanitizeZoomSettings(payload.zoomSettings),
-    notificationRecipients: normalizeEmailList(payload.notificationRecipients),
   };
 };
 
@@ -349,13 +346,11 @@ function PublicSchedules({
         rangePadding: selectedSchedule.rangePadding,
         fitSettings: selectedSchedule.fitSettings,
         zoomSettings: selectedSchedule.zoomSettings,
-        notificationRecipients: selectedSchedule.notificationRecipients,
       },
       {
         sourceName: selectedSchedule.name,
         sourceId: selectedId,
         sourceUpdatedAt: selectedMeta?.updatedAt ?? selectedMeta?.updated_at,
-        sourceNotificationRecipients: selectedSchedule.notificationRecipients,
         sourceFolderId: selectedMeta?.folderId ?? selectedMeta?.folder_id ?? null,
         sourceFolderPath: selectedMeta?.folderPath ?? selectedMeta?.folder_path ?? '',
       },
