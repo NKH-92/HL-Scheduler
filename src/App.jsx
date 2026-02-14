@@ -1467,12 +1467,6 @@ function App() {
       return;
     }
 
-    if (authUser.isAdmin && appRole === 'admin' && activeMainTab !== 'edit') {
-      skipNextEditAutoResetRef.current = true;
-      resetProjectState();
-      return;
-    }
-
     if (!authUser.isAdmin && activeMainTab !== 'browse') {
       setActiveMainTab('browse');
       setActiveEditorTab('tasks');
@@ -1485,7 +1479,6 @@ function App() {
     adminAppUrl,
     publicAppUrl,
     activeMainTab,
-    resetProjectState,
   ]);
 
   const submitAuthLogin = useCallback(
