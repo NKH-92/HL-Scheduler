@@ -1095,9 +1095,93 @@ const handleGetSchedule = async (request, env, id) => {
 };
 
 const handleCreateSchedule = async (request, env) => {
-  void request;
-  void env;
-  return errorResponse('POST /api/schedules is disabled in shared-source mode.', { status: 403 });
+  const readOnlyError = ensureNotReadOnly(env);
+  if (readOnlyError) return readOnlyError;
+
+  const auth = await ensureAuthenticatedUser(request, env);
+  if (auth.error) return auth.error;
+  const actor = auth.user;
+
+  const sharedScheduleId = getSharedScheduleId(env);
+  if (sharedScheduleId) {
+    return errorResponse('POST /api/schedules is disabled in shared-source mode.', { status: 403 });
+  }
+
+  const bodyResult = await readJsonObjectBody(request);
+  if (!bodyResult.ok) return errorResponse(bodyResult.message, { status: 400 });
+  const payload = bodyResult.payload;
+
+  const parsed = parseScheduleWritePayload(payload, null);
+  if (!parsed.ok) return errorResponse(parsed.message, { status: 400 });
+
+  const recipientsError = validateRecipientsForCreate(parsed.notificationRecipients);
+  if (recipientsError) return errorResponse(recipientsError, { status: 400 });
+
+  if (parsed.folderId != null) {
+    const folderExists = await ensureFolderExists(env.DB, parsed.folderId);
+    if (!folderExists) return errorResponse('folderId does not exist.', { status: 400 });
+  }
+
+  const createdByEmail = actor.email;
+  const updatedByEmail = actor.email;
+  const fromDomainCheck = validateAllowedFromDomain(createdByEmail, env);
+  if (!fromDomainCheck.ok) return errorResponse(fromDomainCheck.message, { status: 400 });
+
+  const id = crypto.randomUUID();
+  const timestamp = nowMs();
+  parsed.data.createdByEmail = createdByEmail;
+  parsed.data.updatedByEmail = updatedByEmail;
+  parsed.data.createdAt = timestamp;
+  parsed.data.updatedAt = timestamp;
+
+  const runResult = await env.DB
+    .prepare(
+      [
+        'INSERT INTO schedules (id, name, data, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at)',
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ].join(' '),
+    )
+    .bind(
+      id,
+      parsed.name,
+      JSON.stringify(parsed.data),
+      parsed.tasks.length,
+      parsed.vacations.length,
+      parsed.folderId,
+      createdByEmail,
+      updatedByEmail,
+      timestamp,
+      timestamp,
+    )
+    .run();
+
+  if (!runResult?.success) {
+    return errorResponse('Failed to create schedule.', { status: 500 });
+  }
+
+  const folderContext = await buildFolderContext(env.DB);
+  return jsonResponse(
+    {
+      id,
+      name: parsed.name,
+      url: buildScheduleUrl(request, id),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      tasksCount: parsed.tasks.length,
+      vacationsCount: parsed.vacations.length,
+      folderId: parsed.folderId,
+      folderPath: parsed.folderId ? String(folderContext.pathById.get(parsed.folderId) || '') : '',
+      createdByEmail,
+      updatedByEmail,
+      notificationRecipients: parsed.notificationRecipients,
+      notification: {
+        status: 'skipped',
+        reason: 'Notification is sent on updates only.',
+        recipientCount: parsed.notificationRecipients.length,
+      },
+    },
+    { status: 201 },
+  );
 };
 
 const handleUpdateSchedule = async (request, env, id) => {
