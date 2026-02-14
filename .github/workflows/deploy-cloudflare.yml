@@ -57,7 +57,7 @@ jobs:
           VITE_ADMIN_API_BASE: https://hl-scheduler-admin-api.skarhkdgus7.workers.dev
           VITE_PUBLIC_APP_URL: https://hl-scheduler-public.pages.dev
           VITE_ADMIN_APP_URL: https://hl-scheduler-admin.pages.dev
-          VITE_SHARED_SCHEDULE_ID: ${{ vars.SHARED_SCHEDULE_ID }}
+          VITE_SHARED_SCHEDULE_ID: b8472830-e394-4561-babf-e5258b907ee9
         run: npm run build
 
       - name: Deploy public pages
@@ -93,7 +93,7 @@ jobs:
           VITE_ADMIN_API_BASE: https://hl-scheduler-admin-api.skarhkdgus7.workers.dev
           VITE_PUBLIC_APP_URL: https://hl-scheduler-public.pages.dev
           VITE_ADMIN_APP_URL: https://hl-scheduler-admin.pages.dev
-          VITE_SHARED_SCHEDULE_ID: ${{ vars.SHARED_SCHEDULE_ID }}
+          VITE_SHARED_SCHEDULE_ID: b8472830-e394-4561-babf-e5258b907ee9
         run: npm run build
 
       - name: Deploy admin pages
