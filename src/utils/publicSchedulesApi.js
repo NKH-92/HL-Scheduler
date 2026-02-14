@@ -2,7 +2,7 @@ const trimTrailingSlashes = (value) => String(value || '').replace(/\/+$/, '');
 const normalizeRole = (value) => (String(value || '').trim().toLowerCase() === 'admin' ? 'admin' : 'public');
 
 const WRITE_AUTH_ERROR_MESSAGE = 'Write access denied. Please sign in with an approved account.';
-const ADMIN_AUTH_ERROR_MESSAGE = 'Admin access denied. Use the admin URL and sign in as an approved admin.';
+const ADMIN_AUTH_ERROR_MESSAGE = 'Admin access denied. Sign in with an approved admin account.';
 const AUTH_TOKEN_STORAGE_KEY = 'hl_scheduler_auth_token';
 
 export const PUBLIC_UNCATEGORIZED_FOLDER_ID = '__uncategorized__';

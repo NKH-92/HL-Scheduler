@@ -31,7 +31,7 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy -e admin --config server/public-schedules-worker/wrangler.toml
 
-  deploy-pages-public:
+  deploy-pages:
     runs-on: ubuntu-latest
     needs:
       - deploy-workers
@@ -48,57 +48,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build public app
+      - name: Build web app
         env:
           VITE_APP_ROLE: public
           VITE_PUBLIC_SCHEDULES_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
           VITE_PUBLIC_SCHEDULES_WRITE_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
           VITE_AUTH_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_ADMIN_API_BASE: https://hl-scheduler-admin-api.skarhkdgus7.workers.dev
+          VITE_ADMIN_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
           VITE_PUBLIC_APP_URL: https://hl-scheduler-public.pages.dev
-          VITE_ADMIN_APP_URL: https://hl-scheduler-admin.pages.dev
+          VITE_ADMIN_APP_URL: https://hl-scheduler-public.pages.dev
           VITE_SHARED_SCHEDULE_ID: ""
         run: npm run build
 
-      - name: Deploy public pages
+      - name: Deploy pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy dist --project-name hl-scheduler-public --branch main
-
-  deploy-pages-admin:
-    runs-on: ubuntu-latest
-    needs:
-      - deploy-workers
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build admin app
-        env:
-          VITE_APP_ROLE: admin
-          VITE_PUBLIC_SCHEDULES_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_PUBLIC_SCHEDULES_WRITE_API_BASE: https://hl-scheduler-admin-api.skarhkdgus7.workers.dev
-          VITE_AUTH_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_ADMIN_API_BASE: https://hl-scheduler-admin-api.skarhkdgus7.workers.dev
-          VITE_PUBLIC_APP_URL: https://hl-scheduler-public.pages.dev
-          VITE_ADMIN_APP_URL: https://hl-scheduler-admin.pages.dev
-          VITE_SHARED_SCHEDULE_ID: ""
-        run: npm run build
-
-      - name: Deploy admin pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name hl-scheduler-admin --branch main

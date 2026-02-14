@@ -30,9 +30,6 @@ import { readStorage } from './utils/storage';
 import { STORAGE_KEYS } from './utils/storageKeys';
 import {
   PUBLIC_UNCATEGORIZED_FOLDER_ID,
-  getAdminAppUrl,
-  getPublicAppUrl,
-  getSchedulerAppRole,
   getSharedScheduleId,
   getPublicSchedule,
   isPublicSchedulesEnabled,
@@ -362,15 +359,11 @@ function App() {
 
   const hlSchedulerApi = globalThis.hlScheduler;
   const isDesktopApp = !!hlSchedulerApi && typeof hlSchedulerApi.setZoomFactor === 'function';
-  const appRole = useMemo(() => getSchedulerAppRole(), []);
-  const publicAppUrl = useMemo(() => getPublicAppUrl(), []);
-  const adminAppUrl = useMemo(() => getAdminAppUrl(), []);
-  const isAdminApp = appRole === 'admin';
   const sharedScheduleId = useMemo(() => getSharedScheduleId(), []);
   const isSharedScheduleLocked = !!sharedScheduleId;
   const canEditSchedules = isAuthenticated && permissions.canEditSchedules;
   const canManageFolders = isAuthenticated && permissions.canManageFolders && isAdmin;
-  const canManageUsers = isAdminApp && isAuthenticated && permissions.canManageUsers && isAdmin;
+  const canManageUsers = isAuthenticated && permissions.canManageUsers && isAdmin;
   const canAccessEditor = canEditSchedules;
   const canWritePublicSchedules = canEditSchedules && isPublicSchedulesWriteEnabled();
   const employeeDirectory = useMemo(() => getEmployeeDirectory(), []);
@@ -1434,52 +1427,21 @@ function App() {
       const safeIsAdmin = !!user?.isAdmin;
 
       if (safeIsAdmin) {
-        if (appRole !== 'admin' && adminAppUrl) {
-          window.location.assign(adminAppUrl);
-          return;
-        }
         skipNextEditAutoResetRef.current = true;
         resetProjectState();
-        return;
-      }
-
-      if (!safeIsAdmin && appRole === 'admin' && publicAppUrl) {
-        window.location.assign(publicAppUrl);
         return;
       }
 
       setActiveMainTab('browse');
       setActiveEditorTab('tasks');
     },
-    [appRole, adminAppUrl, publicAppUrl, resetProjectState],
+    [resetProjectState],
   );
 
   useEffect(() => {
     if (isAuthLoading || !isAuthenticated || !authUser) return;
-
-    if (authUser.isAdmin && appRole !== 'admin' && adminAppUrl) {
-      window.location.assign(adminAppUrl);
-      return;
-    }
-
-    if (!authUser.isAdmin && appRole === 'admin' && publicAppUrl) {
-      window.location.assign(publicAppUrl);
-      return;
-    }
-
-    if (!authUser.isAdmin && activeMainTab !== 'browse') {
-      setActiveMainTab('browse');
-      setActiveEditorTab('tasks');
-    }
-  }, [
-    isAuthLoading,
-    isAuthenticated,
-    authUser,
-    appRole,
-    adminAppUrl,
-    publicAppUrl,
-    activeMainTab,
-  ]);
+    routeByUserRole(authUser);
+  }, [isAuthLoading, isAuthenticated, authUser, routeByUserRole]);
 
   const submitAuthLogin = useCallback(
     async ({ email, password }) => {
