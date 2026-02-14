@@ -297,6 +297,7 @@ const verifyPassword = async (password, encoded, env) => {
 const getSessionTtlHours = (env) => clamp(toInt(env.SESSION_TTL_HOURS, 12), 1, 168);
 const getSessionTtlMs = (env) => getSessionTtlHours(env) * 60 * 60 * 1000;
 const getSessionCookieName = (env) => String(env.SESSION_COOKIE_NAME || SESSION_COOKIE_NAME_DEFAULT).trim() || SESSION_COOKIE_NAME_DEFAULT;
+const getSessionCookieDomain = (env) => String(env.SESSION_COOKIE_DOMAIN || '').trim().replace(/^\.+/, '');
 const getSessionCookieSameSite = (env) => {
   const value = String(env.SESSION_COOKIE_SAME_SITE || 'None').trim().toLowerCase();
   if (value === 'lax') return 'Lax';
@@ -306,29 +307,35 @@ const getSessionCookieSameSite = (env) => {
 
 const buildSessionCookie = (token, env) => {
   const name = getSessionCookieName(env);
+  const domain = getSessionCookieDomain(env);
   const ttlSeconds = Math.max(60, Math.floor(getSessionTtlMs(env) / 1000));
   const sameSite = getSessionCookieSameSite(env);
-  return [
+  const parts = [
     `${name}=${encodeURIComponent(String(token || '').trim())}`,
     `Max-Age=${ttlSeconds}`,
     `Path=${SESSION_COOKIE_PATH}`,
     'HttpOnly',
     'Secure',
     `SameSite=${sameSite}`,
-  ].join('; ');
+  ];
+  if (domain) parts.push(`Domain=${domain}`);
+  return parts.join('; ');
 };
 
 const buildSessionCookieClear = (env) => {
   const name = getSessionCookieName(env);
+  const domain = getSessionCookieDomain(env);
   const sameSite = getSessionCookieSameSite(env);
-  return [
+  const parts = [
     `${name}=`,
     'Max-Age=0',
     `Path=${SESSION_COOKIE_PATH}`,
     'HttpOnly',
     'Secure',
     `SameSite=${sameSite}`,
-  ].join('; ');
+  ];
+  if (domain) parts.push(`Domain=${domain}`);
+  return parts.join('; ');
 };
 
 const parseBearerToken = (request) => {
