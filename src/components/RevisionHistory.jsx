@@ -25,8 +25,17 @@ const REVISION_ITEMS = [
   {
     id: 'rev-4-0',
     title: 'Rev.4.0',
-    content:
-      '공개 일정 폴더 트리 기능 추가 (폴더 마스터 기반 분류, 폴더 선택 조회/검색, 업로드 시 폴더 선택, 관리자 키 기반 폴더 생성·삭제)',
+    content: [
+      '웹앱 전환 기반 정리 (React/Vite + Cloudflare Pages/Workers + D1 연동).',
+      '공개 일정 고도화: 폴더 트리, 폴더별 조회/검색, 미리보기/가져오기, 업로드 시 폴더 선택.',
+      '권한 분리: 비로그인 사용자는 조회만 가능, 승인 사용자만 편집/업로드 가능.',
+      '관리자 기능 강화: 폴더 생성/삭제/이동 권한을 admin으로 제한.',
+      '승인형 로그인 추가: 이메일 ID 회원가입(pending), 로그인/로그아웃, 토큰 세션 처리.',
+      '관리자 사용자관리 추가: 승인대기 조회, 승인/거절, 임시 비밀번호 초기화.',
+      '이력 추적 강화: 게시자(createdByEmail)·수정자(updatedByEmail) 자동 기록/표시.',
+      '사원주소록 연동: 이메일 매칭으로 이름/부서/직위 표시 및 작업 편집 시 사원 선택 지원.',
+      '로그인 역할별 진입 흐름 개선: admin 로그인 시 편집 화면 초기화, 일반 사용자는 공개 일정 중심 진입.',
+    ],
   },
 ];
 
@@ -61,7 +70,15 @@ function RevisionHistory() {
 
             {isOpen && (
               <div id={`${item.id}-content`} className="border-t border-slate-200/70 px-5 py-4 text-sm text-slate-700">
-                {item.content}
+                {Array.isArray(item.content) ? (
+                  <ul className="list-disc space-y-1 pl-5">
+                    {item.content.map((line, index) => (
+                      <li key={`${item.id}-${index}`}>{line}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  item.content
+                )}
               </div>
             )}
           </section>
