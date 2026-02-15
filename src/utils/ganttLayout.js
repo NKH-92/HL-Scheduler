@@ -1,4 +1,5 @@
 export const GANTT_LEFT_PANE_PX = 256;
+export const GANTT_LEFT_PANE_COMPACT_PX = 180;
 export const GANTT_EXPORT_LEFT_PANE_PX = 320;
 export const REPORT_PAGE_WIDTH_PX = 1000;
 export const REPORT_CHART_MIN_WIDTH_PX = 320;

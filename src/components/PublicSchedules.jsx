@@ -14,6 +14,7 @@ import {
 } from '../utils/publicSchedulesApi';
 import { normalizeTasks, normalizeVacations } from '../utils/data';
 import { mergeRangePadding, sanitizeFitSettings, sanitizeZoomSettings } from '../utils/schedulerSettings';
+import useIsMobileViewport from '../hooks/useIsMobileViewport';
 
 const ALL_FOLDERS_ID = '__all_folders__';
 const PAGE_SIZE = 40;
@@ -111,6 +112,7 @@ function PublicSchedules({
   canImport = true,
   sharedScheduleId = '',
 }) {
+  const isMobileViewport = useIsMobileViewport();
   const enabled = useMemo(() => isPublicSchedulesEnabled(), []);
   const canManageFolders = !!canManage;
   const sharedModeId = String(sharedScheduleId || '').trim();
@@ -731,7 +733,15 @@ function PublicSchedules({
 
               <div className="min-h-0 flex-1 p-4">
                 <div className="h-full min-h-[340px] min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
-                  <GanttChart tasks={filteredPreviewTasks} vacations={selectedSchedule.vacations} viewMode={previewViewMode} rangePadding={rangePadding} fitEnabled={fitEnabled} zoom={zoomValue / 100} />
+                  <GanttChart
+                    tasks={filteredPreviewTasks}
+                    vacations={selectedSchedule.vacations}
+                    viewMode={previewViewMode}
+                    rangePadding={rangePadding}
+                    fitEnabled={fitEnabled}
+                    zoom={zoomValue / 100}
+                    compactMode={isMobileViewport}
+                  />
                 </div>
               </div>
             </>

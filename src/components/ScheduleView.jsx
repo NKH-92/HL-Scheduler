@@ -2,6 +2,7 @@
 import { getDaysDiff, toDate } from '../utils/dates';
 import GanttChart from './GanttChart';
 import { Save, Search, XIcon } from './Icons';
+import useIsMobileViewport from '../hooks/useIsMobileViewport';
 
 function ScheduleView({
   projectName,
@@ -30,6 +31,8 @@ function ScheduleView({
 }) {
   const DAY_FIT_AUTO_DISABLE_DAYS = 365;
   const DAY_FIT_REENABLE_DAYS = 330;
+  const isMobileViewport = useIsMobileViewport();
+  const mobileDefaultAppliedRef = useRef(false);
 
   const rangeUnit = ganttViewMode === 'Day' ? '일' : ganttViewMode === 'Week' ? '주' : '월';
   const zoomValue = Math.round(Number(zoomSettings?.[ganttViewMode] ?? 100)) || 100;
@@ -82,6 +85,14 @@ function ScheduleView({
       autoFitDisabledRef.current = false;
     }
   }, [ganttViewMode, isLongDayRange, shouldReenableFit, fitEnabled, updateFit]);
+
+  useEffect(() => {
+    if (!isMobileViewport || mobileDefaultAppliedRef.current) return;
+    if (ganttViewMode === 'Day') {
+      setGanttViewMode('Week');
+    }
+    mobileDefaultAppliedRef.current = true;
+  }, [isMobileViewport, ganttViewMode, setGanttViewMode]);
 
   return (
     <div className="animate-fade-in flex min-h-0 flex-1 flex-col gap-5">
@@ -312,6 +323,7 @@ function ScheduleView({
             fitEnabled={effectiveFitEnabled}
             zoom={zoomValue / 100}
             onTaskDateChange={onTaskDateChange}
+            compactMode={isMobileViewport}
           />
         </div>
 

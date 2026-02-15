@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatDate, getDaysDiff, getKoreanDay, getWeekNumber, toDate, toUtcMidnightMs } from '../utils/dates';
-import { GANTT_EXPORT_LEFT_PANE_PX, GANTT_LEFT_PANE_PX } from '../utils/ganttLayout';
+import { GANTT_EXPORT_LEFT_PANE_PX, GANTT_LEFT_PANE_COMPACT_PX, GANTT_LEFT_PANE_PX } from '../utils/ganttLayout';
 
 function GanttChart({
   tasks,
@@ -14,6 +14,7 @@ function GanttChart({
   exportViewportWidth = 0,
   exportLeftPaneWidth = 0,
   onTaskDateChange,
+  compactMode = false,
 }) {
   const { minDate, maxDate, totalDays } = useMemo(() => {
     const getValidDate = (value) => {
@@ -87,8 +88,14 @@ function GanttChart({
   const dragPreviewPendingRef = useRef(null);
   const [dragPreview, setDragPreview] = useState(null);
 
-  const HEADER_HEIGHT_PX = 68;
-  const ROW_HEIGHT_PX = 56;
+  const isCompactMode = !isExportMode && compactMode;
+  const HEADER_HEIGHT_PX = isCompactMode ? 56 : 68;
+  const ROW_HEIGHT_PX = isCompactMode ? 46 : 56;
+  const TOP_HEADER_HEIGHT_PX = isCompactMode ? 30 : 36;
+  const BOTTOM_HEADER_HEIGHT_PX = HEADER_HEIGHT_PX - TOP_HEADER_HEIGHT_PX;
+  const BAR_HEIGHT_PX = isCompactMode ? 24 : 28;
+  const RESIZE_HANDLE_WIDTH_PX = isCompactMode ? 6 : 8;
+  const MOBILE_BAR_LABEL_CLASS = isCompactMode ? 'text-[9px] ml-2 pr-1.5' : 'text-[10px] ml-3 pr-2';
 
   const isInteractive = !isExportMode && typeof onTaskDateChange === 'function';
 
@@ -387,7 +394,8 @@ function GanttChart({
   const leftPaneWidthPx = (() => {
     const override = Number(exportLeftPaneWidth);
     if (Number.isFinite(override) && override > 0) return override;
-    return isExportMode ? GANTT_EXPORT_LEFT_PANE_PX : GANTT_LEFT_PANE_PX;
+    if (isExportMode) return GANTT_EXPORT_LEFT_PANE_PX;
+    return isCompactMode ? GANTT_LEFT_PANE_COMPACT_PX : GANTT_LEFT_PANE_PX;
   })();
 
   const chartWidth = totalDays * colWidth;
@@ -406,10 +414,12 @@ function GanttChart({
   const colEnd = enableColVirtualization ? Math.max(colStart, Math.min(totalDays, colWindow.end)) : totalDays;
   const todayUtcMs = toUtcMidnightMs(new Date());
 
-  const topHeaderClass =
-    'flex items-center justify-center border-r border-indigo-100 bg-indigo-50/50 text-xs font-bold text-indigo-900 h-9 backdrop-blur-sm leading-none';
-  const bottomHeaderBase =
-    'flex items-center justify-center border-r border-slate-100 text-[10px] h-8 font-medium leading-none';
+  const topHeaderClass = `flex h-full items-center justify-center border-r border-indigo-100 bg-indigo-50/50 font-bold text-indigo-900 backdrop-blur-sm leading-none ${
+    isCompactMode ? 'text-[11px]' : 'text-xs'
+  }`;
+  const bottomHeaderBase = `flex h-full items-center justify-center border-r border-slate-100 font-medium leading-none ${
+    isCompactMode ? 'text-[9px]' : 'text-[10px]'
+  }`;
 
   const renderTopHeader = () => {
     const topHeaders = [];
@@ -718,11 +728,11 @@ function GanttChart({
     );
   };
 
-  const topHeaderEl = useMemo(() => renderTopHeader(), [viewMode, totalDays, colWidth, minDate.getTime()]);
+  const topHeaderEl = useMemo(() => renderTopHeader(), [viewMode, totalDays, colWidth, minDate.getTime(), topHeaderClass]);
 
   const bottomHeaderEl = useMemo(
     () => renderBottomHeader(),
-    [viewMode, totalDays, colWidth, minDate.getTime(), colStart, colEnd],
+    [viewMode, totalDays, colWidth, minDate.getTime(), colStart, colEnd, bottomHeaderBase],
   );
 
   const gridBackgroundEl = useMemo(
@@ -747,7 +757,12 @@ function GanttChart({
           className="border-r border-indigo-100 bg-white flex flex-col z-10 shadow-[4px_0_10px_-3px_rgba(0,0,0,0.05)]"
           style={{ width: `${leftPaneWidthPx}px` }}
         >
-          <div className="h-[68px] border-b border-indigo-100 bg-white flex items-center px-5 font-bold text-xs text-slate-400 uppercase tracking-wider">
+          <div
+            className={`border-b border-indigo-100 bg-white flex items-center font-bold text-slate-400 uppercase tracking-wider ${
+              isCompactMode ? 'px-3 text-[10px]' : 'px-5 text-xs'
+            }`}
+            style={{ height: `${HEADER_HEIGHT_PX}px` }}
+          >
             Task &amp; Assignee
           </div>
           <div className={`${isExportMode ? 'overflow-visible h-auto' : 'overflow-hidden flex-1 relative'}`}>
@@ -756,7 +771,10 @@ function GanttChart({
               {visibleTasks.map((task) => (
                 <div
                   key={task.id}
-                  className={`${isExportMode ? 'h-14' : 'h-14 items-center'} border-b border-slate-50 px-5 flex text-sm transition-colors ${isExportMode ? '' : 'hover:bg-slate-50'}`}
+                  className={`${isExportMode ? '' : 'items-center'} border-b border-slate-50 flex transition-colors ${
+                    isExportMode ? '' : 'hover:bg-slate-50'
+                  } ${isCompactMode ? 'px-3 text-xs' : 'px-5 text-sm'}`}
+                  style={{ height: `${ROW_HEIGHT_PX}px` }}
                 >
                   <div className="flex flex-col w-full min-w-0 justify-center h-full">
                     <div className="flex justify-between items-center min-w-0">
@@ -765,42 +783,54 @@ function GanttChart({
                         className={`text-slate-700 font-semibold ${
                           isExportMode
                             ? 'text-[12px] leading-snug whitespace-normal break-words'
-                            : 'min-w-0 truncate text-[13px] leading-tight'
+                            : isCompactMode
+                              ? 'min-w-0 truncate text-[12px] leading-tight'
+                              : 'min-w-0 truncate text-[13px] leading-tight'
                         }`}
                       >
                         {task.taskName}
                       </span>
-                    </div>
-                    <div className={`flex justify-between items-center min-w-0 ${isExportMode ? 'mt-0.5' : 'mt-1'}`}>
-                      <span
-                        title={task.department || ''}
-                        className={`text-[11px] text-slate-400 ${
-                          isExportMode
-                            ? 'min-w-0 flex-1 pr-2 whitespace-normal break-words leading-snug'
-                            : 'min-w-0 truncate max-w-[100px] leading-tight'
-                        }`}
-                      >
-                        {task.department}
-                      </span>
-                      {task.assignee && (
+                      {isCompactMode && task.assignee && (
                         <span
                           title={task.assignee || ''}
-                          className={`text-[10px] font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100 ${
-                            isExportMode ? 'mr-0.5' : ''
-                          }`}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            lineHeight: 1,
-                            whiteSpace: 'nowrap',
-                            flexShrink: 0,
-                          }}
+                          className="ml-2 inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50 px-1.5 py-0.5 text-[9px] font-medium text-indigo-600"
                         >
                           {task.assignee}
                         </span>
                       )}
                     </div>
+                    {!isCompactMode && (
+                      <div className={`flex justify-between items-center min-w-0 ${isExportMode ? 'mt-0.5' : 'mt-1'}`}>
+                        <span
+                          title={task.department || ''}
+                          className={`text-[11px] text-slate-400 ${
+                            isExportMode
+                              ? 'min-w-0 flex-1 pr-2 whitespace-normal break-words leading-snug'
+                              : 'min-w-0 truncate max-w-[100px] leading-tight'
+                          }`}
+                        >
+                          {task.department}
+                        </span>
+                        {task.assignee && (
+                          <span
+                            title={task.assignee || ''}
+                            className={`text-[10px] font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100 ${
+                              isExportMode ? 'mr-0.5' : ''
+                            }`}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              lineHeight: 1,
+                              whiteSpace: 'nowrap',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {task.assignee}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -822,8 +852,12 @@ function GanttChart({
             <div style={{ width: `${chartWidth}px`, minWidth: '100%' }}>
               <div className={isExportMode ? '' : 'gantt-header-sticky'}>
                 <div className="flex flex-col border-b border-indigo-100 bg-white/80 backdrop-blur-md shadow-sm">
-                  <div className="flex h-9">{topHeaderEl}</div>
-                  <div className="flex h-8">{bottomHeaderEl}</div>
+                  <div className="flex" style={{ height: `${TOP_HEADER_HEIGHT_PX}px` }}>
+                    {topHeaderEl}
+                  </div>
+                  <div className="flex" style={{ height: `${BOTTOM_HEADER_HEIGHT_PX}px` }}>
+                    {bottomHeaderEl}
+                  </div>
                 </div>
               </div>
 
@@ -841,7 +875,11 @@ function GanttChart({
                   const isDraggingThis = !!preview;
                   if (!s) {
                     return (
-                      <div key={task.id} className="h-14 border-b border-slate-50 relative flex items-center">
+                      <div
+                        key={task.id}
+                        className="border-b border-slate-50 relative flex items-center"
+                        style={{ height: `${ROW_HEIGHT_PX}px` }}
+                      >
                         <span className="text-xs text-slate-400 ml-2">일정 미지정</span>
                       </div>
                     );
@@ -852,7 +890,11 @@ function GanttChart({
 
                   if (Number.isNaN(offsetDays) || Number.isNaN(durationDays) || durationDays <= 0) {
                     return (
-                      <div key={task.id} className="h-14 border-b border-slate-50 relative flex items-center">
+                      <div
+                        key={task.id}
+                        className="border-b border-slate-50 relative flex items-center"
+                        style={{ height: `${ROW_HEIGHT_PX}px` }}
+                      >
                         <span className="text-xs text-slate-400 ml-2">일정 오류</span>
                       </div>
                     );
@@ -881,26 +923,32 @@ function GanttChart({
                   }
 
                   return (
-                    <div key={task.id} className="h-14 border-b border-slate-50 relative group flex items-center">
+                    <div
+                      key={task.id}
+                      className="border-b border-slate-50 relative group flex items-center"
+                      style={{ height: `${ROW_HEIGHT_PX}px` }}
+                    >
                       <div
                         onPointerDown={isInteractive ? (e) => startDrag(e, task, 'move') : undefined}
-                        className={`absolute h-7 rounded-full flex items-center transition-all duration-300 hover:scale-[1.02] hover:shadow-lg touch-none ${
+                        className={`absolute rounded-full flex items-center transition-all duration-300 hover:scale-[1.02] hover:shadow-lg touch-none ${
                           isInteractive ? (isDraggingThis ? 'cursor-grabbing ring-2 ring-indigo-200' : 'cursor-grab') : ''
                         } ${barClass}`}
-                        style={{ left: `${left}px`, width: `${width}px` }}
+                        style={{ left: `${left}px`, width: `${width}px`, height: `${BAR_HEIGHT_PX}px` }}
                         title={`${task.taskName} (${task.progress}%) - ${s} ~ ${e}`}
                       >
                         {isInteractive && (
                           <>
                             <div
-                              className="absolute left-0 top-0 bottom-0 w-2 rounded-l-full cursor-ew-resize hover:bg-white/20"
+                              className="absolute left-0 top-0 bottom-0 rounded-l-full cursor-ew-resize hover:bg-white/20"
+                              style={{ width: `${RESIZE_HANDLE_WIDTH_PX}px` }}
                               onPointerDown={(e) => {
                                 e.stopPropagation();
                                 startDrag(e, task, 'resizeStart');
                               }}
                             />
                             <div
-                              className="absolute right-0 top-0 bottom-0 w-2 rounded-r-full cursor-ew-resize hover:bg-white/20"
+                              className="absolute right-0 top-0 bottom-0 rounded-r-full cursor-ew-resize hover:bg-white/20"
+                              style={{ width: `${RESIZE_HANDLE_WIDTH_PX}px` }}
                               onPointerDown={(e) => {
                                 e.stopPropagation();
                                 startDrag(e, task, 'resizeEnd');
@@ -914,7 +962,9 @@ function GanttChart({
                             style={{ width: `${task.progress}%` }}
                           />
                         </div>
-                        <span className="relative ml-3 text-[10px] font-bold text-white drop-shadow-md whitespace-nowrap leading-none pr-2">
+                        <span
+                          className={`relative font-bold text-white drop-shadow-md whitespace-nowrap leading-none ${MOBILE_BAR_LABEL_CLASS}`}
+                        >
                           {task.progress}% {isDelayed && '(지연)'}
                         </span>
                       </div>
