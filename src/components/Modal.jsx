@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 let modalIdSeed = 0;
 const modalStack = [];
@@ -117,7 +118,7 @@ function Modal({
 
   if (!isOpen) return null;
 
-  return (
+  const modalContent = (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 z-0 bg-slate-900/35" onClick={closeOnOverlay ? onClose : undefined} />
       <div className="relative z-10 flex min-h-full items-start justify-center overflow-y-auto p-4 sm:items-center">
@@ -134,6 +135,9 @@ function Modal({
       </div>
     </div>
   );
+
+  if (typeof document === 'undefined' || !document.body) return modalContent;
+  return createPortal(modalContent, document.body);
 }
 
 export default Modal;
