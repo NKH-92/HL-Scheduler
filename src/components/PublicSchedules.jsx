@@ -13,6 +13,7 @@ import {
   listPublicSchedules,
   updatePublicScheduleFolder,
 } from '../utils/publicSchedulesApi';
+import { findEmployeeByEmail, getEmployeeDirectory } from '../utils/employeeDirectory';
 import { normalizeTasks, normalizeVacations } from '../utils/data';
 import { mergeRangePadding, sanitizeFitSettings, sanitizeZoomSettings } from '../utils/schedulerSettings';
 import useIsMobileViewport from '../hooks/useIsMobileViewport';
@@ -26,6 +27,21 @@ const formatDateTime = (value) => {
   const date = typeof value === 'number' ? new Date(value) : new Date(String(value));
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleString();
+};
+
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+
+const buildEmployeeDisplay = (email, directory) => {
+  const safeEmail = normalizeEmail(email);
+  if (!safeEmail) return { email: '', profile: '' };
+
+  const employee = findEmployeeByEmail(safeEmail, directory);
+  if (!employee) return { email: safeEmail, profile: '' };
+
+  return {
+    email: safeEmail,
+    profile: `${employee.name || '-'} / ${employee.department || '-'} / ${employee.position || '-'}`,
+  };
 };
 
 // isPlainObject is now imported from shared.js
@@ -99,6 +115,7 @@ function PublicSchedules({
 }) {
   const isMobileViewport = useIsMobileViewport();
   const enabled = useMemo(() => isPublicSchedulesEnabled(), []);
+  const employeeDirectory = useMemo(() => getEmployeeDirectory(), []);
   const canManageFolders = !!canManage;
   const sharedModeId = String(sharedScheduleId || '').trim();
 
@@ -335,17 +352,17 @@ function PublicSchedules({
       (folderId ? folderId : '미분류');
     const createdAt = formatDateTime(meta.createdAt ?? meta.created_at);
     const updatedAt = formatDateTime(meta.updatedAt ?? meta.updated_at);
-    const createdBy = String(meta.createdByEmail || meta.created_by_email || '').trim().toLowerCase();
-    const updatedBy = String(meta.updatedByEmail || meta.updated_by_email || '').trim().toLowerCase();
+    const createdByInfo = buildEmployeeDisplay(meta.createdByEmail || meta.created_by_email || '', employeeDirectory);
+    const updatedByInfo = buildEmployeeDisplay(meta.updatedByEmail || meta.updated_by_email || '', employeeDirectory);
 
     return [
       { label: '폴더', value: folderPath || '미분류' },
       { label: '등록', value: createdAt || '-' },
       { label: '수정', value: updatedAt || '-' },
-      { label: '게시자', value: createdBy || '-' },
-      { label: '최종 수정자', value: updatedBy || '-' },
+      { label: '게시자', value: createdByInfo.profile || createdByInfo.email || '-' },
+      { label: '최종 수정자', value: updatedByInfo.profile || updatedByInfo.email || '-' },
     ];
-  }, [selectedMeta, folderPathById]);
+  }, [selectedMeta, folderPathById, employeeDirectory]);
 
   const importSelectedSchedule = () => {
     if (!selectedSchedule || !canImport) return;
@@ -615,6 +632,8 @@ function PublicSchedules({
                 const updatedAt = formatDateTime(item?.updatedAt ?? item?.updated_at);
                 const createdByEmail = String(item?.createdByEmail || item?.created_by_email || '').trim().toLowerCase();
                 const updatedByEmail = String(item?.updatedByEmail || item?.updated_by_email || '').trim().toLowerCase();
+                const createdByInfo = buildEmployeeDisplay(createdByEmail, employeeDirectory);
+                const updatedByInfo = buildEmployeeDisplay(updatedByEmail, employeeDirectory);
                 const isSelected = selectedId && id && selectedId === id;
                 const rowFolderIdValue = String(item?.folderId || '').trim() || PUBLIC_UNCATEGORIZED_FOLDER_ID;
                 const isMoving = !!movingFolderBySchedule[id];
@@ -639,8 +658,16 @@ function PublicSchedules({
                           </div>
                           {(updatedByEmail || createdByEmail) && (
                             <div className="mt-2 text-xs text-slate-400">
-                              {createdByEmail && <span className="mr-3">게시자: <span className="text-slate-500">{createdByEmail}</span></span>}
-                              {updatedByEmail && <span>최종 수정자: <span className="text-slate-500">{updatedByEmail}</span></span>}
+                              {createdByEmail && (
+                                <span className="mr-3">
+                                  게시자: <span className="text-slate-500">{createdByInfo.profile || createdByInfo.email}</span>
+                                </span>
+                              )}
+                              {updatedByEmail && (
+                                <span>
+                                  최종 수정자: <span className="text-slate-500">{updatedByInfo.profile || updatedByInfo.email}</span>
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
