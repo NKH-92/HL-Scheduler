@@ -26,8 +26,6 @@ import {
   REPORT_PAGE_WIDTH_PX,
 } from './utils/ganttLayout';
 import { mergeRangePadding, sanitizeFitSettings, sanitizeZoomSettings } from './utils/schedulerSettings';
-import { readStorage } from './utils/storage';
-import { STORAGE_KEYS } from './utils/storageKeys';
 import {
   PUBLIC_UNCATEGORIZED_FOLDER_ID,
   getAdminAppUrl,
@@ -42,24 +40,21 @@ import {
   uploadPublicSchedule,
 } from './utils/publicSchedulesApi';
 import { findEmployeeByEmail, getEmployeeDirectory } from './utils/employeeDirectory';
-
-const escapeHtml = (value) =>
-  String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-
-const sanitizeFileName = (value, fallback) => {
-  const base = String(value || fallback || '').trim() || String(fallback || 'file');
-  return base.replace(/[\\/:*?"<>|]/g, '_');
-};
+import {
+  escapeHtml,
+  sanitizeFileName,
+  isPlainObject,
+  getDisplayVersion,
+  buildFolderSelectOptions as buildFolderSelectOptionsBase,
+  limitArray,
+} from './utils/shared';
 
 const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
 const MAX_IMPORT_TASKS = 5000;
 const MAX_IMPORT_VACATIONS = 2000;
 const MAX_PUBLIC_UPLOAD_TEXT_LENGTH = 1024 * 1024;
+
+const buildFolderSelectOptions = (rows) => buildFolderSelectOptionsBase(rows, PUBLIC_UNCATEGORIZED_FOLDER_ID);
 let imageExportLibsPromise = null;
 
 const loadImageExportLibs = async () => {
@@ -91,41 +86,9 @@ const loadImageExportLibs = async () => {
   return imageExportLibsPromise;
 };
 
-const isPlainObject = (value) => value != null && typeof value === 'object' && !Array.isArray(value);
+// isPlainObject is now imported from shared.js
 
-const buildFolderSelectOptions = (rows) => {
-  const list = Array.isArray(rows) ? rows : [];
-
-  const normalized = list
-    .map((row) => {
-      const id = String(row?.id || '').trim();
-      if (!id) return null;
-      const depth = Math.max(1, Number(row?.depth) || 1);
-      const name = String(row?.name || '').trim() || id;
-      const path = String(row?.path || '').trim() || name;
-      const indent = '-- '.repeat(Math.max(0, depth - 1));
-      return {
-        id,
-        depth,
-        path,
-        label: `${indent}${name}`,
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.path.localeCompare(b.path, 'ko'));
-
-  return [
-    {
-      id: PUBLIC_UNCATEGORIZED_FOLDER_ID,
-      depth: 0,
-      path: '',
-      label: '미분류',
-    },
-    ...normalized,
-  ];
-};
-
-const limitArray = (list, max) => (Array.isArray(list) ? list.slice(0, max) : []);
+// buildFolderSelectOptions and limitArray are now imported from shared.js
 
 const buildImportLimitNotice = (taskCount, vacationCount) => {
   if (!taskCount && !vacationCount) return '';
@@ -157,19 +120,7 @@ const buildInvalidRangeNotice = (taskCount, vacationCount) => {
   return `\n\n종료일이 시작일보다 빠른 데이터(${parts.join(', ')})를 자동으로 보정했습니다.`;
 };
 
-const clampAppZoomFactor = (value) => {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) return 1;
-  return Math.max(0.5, Math.min(2.5, Math.round(n * 100) / 100));
-};
-
-const getDisplayVersion = () => {
-  const raw = typeof __APP_VERSION__ !== 'undefined' ? String(__APP_VERSION__) : '';
-  const parts = raw.split('.').filter(Boolean);
-  if (parts.length >= 2) return `${parts[0]}.${parts[1]}`;
-  if (parts.length === 1) return parts[0];
-  return '';
-};
+// getDisplayVersion is now imported from shared.js
 
 function App() {
   const [activeMainTab, setActiveMainTab] = useState('edit');
@@ -262,14 +213,6 @@ function App() {
     storageError,
   } = useSchedulerStorage();
 
-  const [appZoomFactor, setAppZoomFactor] = useState(() => {
-    const saved = readStorage(STORAGE_KEYS.appZoom);
-    if (saved == null) return 1;
-    return clampAppZoomFactor(saved);
-  });
-
-  const appZoomRef = useRef(appZoomFactor);
-
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [reportTasks, setReportTasks] = useState(null);
@@ -298,8 +241,7 @@ function App() {
   );
   const [isLoadingPublicFolders, setIsLoadingPublicFolders] = useState(false);
   const [taskManagerResetToken, setTaskManagerResetToken] = useState(0);
-  const previousMainTabRef = useRef(activeMainTab);
-  const skipNextEditAutoResetRef = useRef(false);
+
 
   const filteredTasks = useMemo(() => {
     if (!filterText.trim()) return tasks;
@@ -338,28 +280,6 @@ function App() {
     document.title = v ? `HL-Scheduler (Ver.${v})` : 'HL-Scheduler';
   }, []);
 
-  useEffect(() => {
-    appZoomRef.current = appZoomFactor;
-  }, [appZoomFactor]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.appZoom.current, String(appZoomFactor));
-    } catch {
-      // ignore storage failures
-    }
-  }, [appZoomFactor]);
-
-  useEffect(() => {
-    const hlSchedulerApi = globalThis.hlScheduler;
-    if (!hlSchedulerApi || typeof hlSchedulerApi.setZoomFactor !== 'function') return;
-    hlSchedulerApi.setZoomFactor(clampAppZoomFactor(appZoomFactor)).catch((error) => {
-      console.warn('앱 확대 비율 적용 실패', error);
-    });
-  }, [appZoomFactor]);
-
-  const hlSchedulerApi = globalThis.hlScheduler;
-  const isDesktopApp = !!hlSchedulerApi && typeof hlSchedulerApi.setZoomFactor === 'function';
   const appRole = useMemo(() => getSchedulerAppRole(), []);
   const publicAppUrl = useMemo(() => getPublicAppUrl(), []);
   const adminAppUrl = useMemo(() => getAdminAppUrl(), []);
@@ -387,13 +307,7 @@ function App() {
     setIsAuthModalOpen(false);
   }, [isAuthenticated]);
 
-  const setNextAppZoom = (next) => {
-    setAppZoomFactor(clampAppZoomFactor(next));
-  };
 
-  const zoomInApp = () => setNextAppZoom(appZoomRef.current + 0.1);
-  const zoomOutApp = () => setNextAppZoom(appZoomRef.current - 0.1);
-  const resetAppZoom = () => setNextAppZoom(1);
 
   const openReportModal = useCallback(() => {
     setReportTasks(tasks);
@@ -445,12 +359,12 @@ function App() {
     const progress = Number.isFinite(rawProgress) ? Math.max(0, Math.min(100, rawProgress)) : 0;
     const dependencies = Array.isArray(formData.dependencies)
       ? Array.from(
-          new Set(
-            formData.dependencies
-              .map((depId) => String(depId ?? '').trim())
-              .filter((depId) => depId && (!editingTask || depId !== String(editingTask.id))),
-          ),
-        )
+        new Set(
+          formData.dependencies
+            .map((depId) => String(depId ?? '').trim())
+            .filter((depId) => depId && (!editingTask || depId !== String(editingTask.id))),
+        ),
+      )
       : [];
 
     const payload = {
@@ -661,25 +575,12 @@ function App() {
     );
     if (!confirmed) return;
 
-    skipNextEditAutoResetRef.current = true;
     resetProjectState();
   }, [
     confirmAsync,
     resetProjectState,
   ]);
 
-  useEffect(() => {
-    const previousTab = previousMainTabRef.current;
-    const enteredEdit = previousTab !== 'edit' && activeMainTab === 'edit';
-    previousMainTabRef.current = activeMainTab;
-
-    if (!enteredEdit || !canAccessEditor) return;
-    if (skipNextEditAutoResetRef.current) {
-      skipNextEditAutoResetRef.current = false;
-      return;
-    }
-    resetProjectState();
-  }, [activeMainTab, canAccessEditor, resetProjectState]);
 
   const openImageExportModal = () => {
     setExportFileName('');
@@ -796,14 +697,6 @@ function App() {
         exportFileName || `${projectName || '프로젝트'}_간트_${ganttViewMode}_${formatDate(new Date())}`;
       const baseName = sanitizeFileName(baseNameRaw, 'gantt');
       const downloadName = `${baseName}.${ext}`;
-
-      const schedulerApi = globalThis.hlScheduler;
-      if (schedulerApi && typeof schedulerApi.saveImage === 'function') {
-        const result = await schedulerApi.saveImage({ dataUrl, defaultFileName: downloadName, ext });
-        if (result && result.canceled) return;
-        setIsImageExportModalOpen(false);
-        return;
-      }
 
       const link = document.createElement('a');
       link.href = dataUrl;
@@ -968,20 +861,20 @@ function App() {
             </thead>
             <tbody>
               ${reportSourceTasks
-                .map((t) => {
-                  const category = escapeHtml(t.category);
-                  const taskName = escapeHtml(t.taskName);
-                  const department = escapeHtml(t.department);
-                  const assignee = escapeHtml(t.assignee || '-');
-                  const start = escapeHtml(t.start || '-');
-                  const end = escapeHtml(t.end || t.start || '-');
-                  const dependencies = escapeHtml(
-                    Array.isArray(t.dependencies) ? t.dependencies.map((depId) => String(depId)).join(', ') : '-',
-                  );
-                  const progress = escapeHtml(`${t.progress}%`);
-                  return `<tr><td>${category}</td><td>${taskName}</td><td>${department}</td><td>${assignee}</td><td>${start} ~ ${end}</td><td>${dependencies}</td><td>${progress}</td></tr>`;
-                })
-                .join('')}
+          .map((t) => {
+            const category = escapeHtml(t.category);
+            const taskName = escapeHtml(t.taskName);
+            const department = escapeHtml(t.department);
+            const assignee = escapeHtml(t.assignee || '-');
+            const start = escapeHtml(t.start || '-');
+            const end = escapeHtml(t.end || t.start || '-');
+            const dependencies = escapeHtml(
+              Array.isArray(t.dependencies) ? t.dependencies.map((depId) => String(depId)).join(', ') : '-',
+            );
+            const progress = escapeHtml(`${t.progress}%`);
+            return `<tr><td>${category}</td><td>${taskName}</td><td>${department}</td><td>${assignee}</td><td>${start} ~ ${end}</td><td>${dependencies}</td><td>${progress}</td></tr>`;
+          })
+          .join('')}
             </tbody>
           </table>
           </div>
@@ -1248,10 +1141,10 @@ function App() {
         const confirmed = skipConfirm
           ? true
           : await confirmAsync(`${title}을(를) 가져올까요?${invalidNotice}\n\n현재 일정 데이터는 덮어쓰기 됩니다.`, {
-              title: '가져오기 확인',
-              confirmText: '가져오기',
-              cancelText: '취소',
-            });
+            title: '가져오기 확인',
+            confirmText: '가져오기',
+            cancelText: '취소',
+          });
         if (confirmed) {
           setTasks(applyTaskRules(tasksRaw));
           setProjectName('');
@@ -1286,10 +1179,10 @@ function App() {
         const confirmed = skipConfirm
           ? true
           : await confirmAsync(`'${resolvedName}' 프로젝트를 가져올까요?${invalidNotice}\n\n현재 일정 데이터는 덮어쓰기 됩니다.`, {
-              title: '가져오기 확인',
-              confirmText: '가져오기',
-              cancelText: '취소',
-            });
+            title: '가져오기 확인',
+            confirmText: '가져오기',
+            cancelText: '취소',
+          });
         if (confirmed) {
           setTasks(applyTaskRules(tasksRaw));
           setProjectName(typeof parsed.name === 'string' ? parsed.name : String(sourceName || ''));
@@ -1343,15 +1236,14 @@ function App() {
         setPublicOrigin(
           safeSourceId
             ? {
-                id: safeSourceId,
-                name: String(sourceName || '').trim(),
-                updatedAt: Number.isFinite(safeUpdatedAt) ? safeUpdatedAt : null,
-                folderId: safeFolderIdRaw || PUBLIC_UNCATEGORIZED_FOLDER_ID,
-                folderPath: safeFolderPath,
-              }
+              id: safeSourceId,
+              name: String(sourceName || '').trim(),
+              updatedAt: Number.isFinite(safeUpdatedAt) ? safeUpdatedAt : null,
+              folderId: safeFolderIdRaw || PUBLIC_UNCATEGORIZED_FOLDER_ID,
+              folderPath: safeFolderPath,
+            }
             : null,
         );
-        skipNextEditAutoResetRef.current = true;
         setActiveMainTab('edit');
         setActiveEditorTab('schedule');
       } catch (error) {
@@ -1432,7 +1324,6 @@ function App() {
           window.location.href = adminAppUrl;
           return;
         }
-        skipNextEditAutoResetRef.current = true;
         resetProjectState();
         return;
       }
@@ -1686,16 +1577,16 @@ function App() {
         setPublicOrigin(
           updatedId
             ? {
-                id: updatedId,
-                name: safeTitle,
-                updatedAt: Number.isFinite(nextUpdatedAt)
-                  ? nextUpdatedAt
-                  : Number.isFinite(ifUnmodifiedAt)
-                    ? ifUnmodifiedAt
-                    : null,
-                folderId: nextFolderId,
-                folderPath: nextFolderPath,
-              }
+              id: updatedId,
+              name: safeTitle,
+              updatedAt: Number.isFinite(nextUpdatedAt)
+                ? nextUpdatedAt
+                : Number.isFinite(ifUnmodifiedAt)
+                  ? ifUnmodifiedAt
+                  : null,
+              folderId: nextFolderId,
+              folderPath: nextFolderPath,
+            }
             : null,
         );
 
@@ -1809,6 +1700,7 @@ function App() {
         <PublicSchedules
           refreshToken={publicRefreshToken}
           onImportSchedule={importFromPublicSchedule}
+          onConfirm={confirmAsync}
           canManage={canManageFolders}
           canImport={canAccessEditor}
           sharedScheduleId={sharedScheduleId}
@@ -1827,11 +1719,6 @@ function App() {
         onEditorTabChange={setActiveEditorTab}
         onSaveProject={saveProjectFile}
         onImportFile={handleFileImport}
-        showAppZoomControls={isDesktopApp}
-        appZoomPercent={Math.round(appZoomFactor * 100)}
-        onZoomIn={zoomInApp}
-        onZoomOut={zoomOutApp}
-        onZoomReset={resetAppZoom}
         canAccessEditor={canAccessEditor}
         isAuthenticated={isAuthenticated}
         authEmail={authUser?.email || ''}

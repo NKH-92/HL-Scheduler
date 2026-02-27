@@ -37,10 +37,26 @@ export const isAdminApiEnabled = () => Boolean(getAdminApiBase());
 
 let authToken = '';
 
+try {
+  const saved = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+  if (saved) authToken = String(saved).trim();
+} catch {
+  // ignore storage failures
+}
+
 export const getPublicSchedulesAuthToken = () => String(authToken || '').trim();
 
 export const setPublicSchedulesAuthToken = (token) => {
   authToken = String(token || '').trim();
+  try {
+    if (authToken) {
+      localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, authToken);
+    } else {
+      localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // ignore storage failures
+  }
 };
 
 class PublicSchedulesApiError extends Error {

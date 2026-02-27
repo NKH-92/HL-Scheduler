@@ -15,6 +15,7 @@ import {
 import { normalizeTasks, normalizeVacations } from '../utils/data';
 import { mergeRangePadding, sanitizeFitSettings, sanitizeZoomSettings } from '../utils/schedulerSettings';
 import useIsMobileViewport from '../hooks/useIsMobileViewport';
+import { isPlainObject, clampZoom, buildFolderSelectOptions as buildFolderSelectOptionsBase } from '../utils/shared';
 
 const ALL_FOLDERS_ID = '__all_folders__';
 const PAGE_SIZE = 40;
@@ -26,7 +27,7 @@ const formatDateTime = (value) => {
   return date.toLocaleString();
 };
 
-const isPlainObject = (value) => value != null && typeof value === 'object' && !Array.isArray(value);
+// isPlainObject is now imported from shared.js
 
 const normalizeSchedulePayload = (payload, fallbackName) => {
   if (Array.isArray(payload)) {
@@ -75,39 +76,22 @@ const normalizeFolderNodes = (rows) =>
     .filter(Boolean)
     .sort((a, b) => a.path.localeCompare(b.path, 'ko'));
 
-const buildFolderSelectOptions = (folders) => {
-  const options = [
-    {
-      id: PUBLIC_UNCATEGORIZED_FOLDER_ID,
-      depth: 0,
-      path: '',
-      label: '미분류',
-    },
-  ];
+const buildFolderSelectOptions = (folders) => buildFolderSelectOptionsBase(
+  folders.map((folder) => ({
+    id: folder.id,
+    depth: folder.depth,
+    name: folder.name,
+    path: folder.path,
+  })),
+  PUBLIC_UNCATEGORIZED_FOLDER_ID,
+);
 
-  folders.forEach((folder) => {
-    const depth = Math.max(1, Number(folder?.depth) || 1);
-    const label = `${'-- '.repeat(Math.max(0, depth - 1))}${folder.name}`;
-    options.push({
-      id: folder.id,
-      depth,
-      path: folder.path,
-      label,
-    });
-  });
-
-  return options;
-};
-
-const clampZoom = (value) => {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return 100;
-  return Math.max(25, Math.min(300, Math.round(n)));
-};
+// clampZoom is now imported from shared.js
 
 function PublicSchedules({
   refreshToken = 0,
   onImportSchedule,
+  onConfirm,
   canManage = false,
   canImport = true,
   sharedScheduleId = '',
@@ -234,9 +218,9 @@ function PublicSchedules({
           offset,
           ...(folderFilter !== undefined
             ? {
-                folderId: folderFilter,
-                includeDescendants: true,
-              }
+              folderId: folderFilter,
+              includeDescendants: true,
+            }
             : {}),
         });
         if (listRequestIdRef.current !== requestId) return;
@@ -361,7 +345,7 @@ function PublicSchedules({
 
   const createFolder = async () => {
     if (!canManageFolders) {
-      setFolderManageError('Folder management is available only in admin mode.');
+      setFolderManageError('폴더 관리는 관리자 모드에서만 사용할 수 있습니다.');
       return;
     }
     const safeName = String(newFolderName || '').trim();
@@ -385,7 +369,7 @@ function PublicSchedules({
 
   const deleteSelectedFolder = async () => {
     if (!canManageFolders) {
-      setFolderManageError('Folder management is available only in admin mode.');
+      setFolderManageError('폴더 관리는 관리자 모드에서만 사용할 수 있습니다.');
       return;
     }
     if (selectedFolderId === ALL_FOLDERS_ID || selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID) {
@@ -397,7 +381,10 @@ function PublicSchedules({
       setFolderManageError('선택한 폴더를 찾을 수 없습니다.');
       return;
     }
-    const confirmed = window.confirm(`폴더 '${selectedFolder.path || selectedFolder.name}'를 삭제할까요?`);
+    const doConfirm = typeof onConfirm === 'function'
+      ? () => onConfirm(`폴더 '${selectedFolder.path || selectedFolder.name}'를 삭제할까요?`, { title: '삭제 확인', confirmText: '삭제', cancelText: '취소' })
+      : () => Promise.resolve(window.confirm(`폴더 '${selectedFolder.path || selectedFolder.name}'를 삭제할까요?`));
+    const confirmed = await doConfirm();
     if (!confirmed) return;
 
     setIsDeletingFolder(true);
@@ -416,7 +403,7 @@ function PublicSchedules({
 
   const changeScheduleFolder = async (item, nextFolderIdRaw) => {
     if (!canManageFolders) {
-      setListError('Folder move is available only in admin mode.');
+      setListError('폴더 이동은 관리자 모드에서만 사용할 수 있습니다.');
       return;
     }
 
@@ -442,22 +429,22 @@ function PublicSchedules({
           String(row?.id || '').trim() !== scheduleId
             ? row
             : {
-                ...row,
-                folderId: resultFolderId,
-                folderPath: resultFolderPath,
-                updatedAt: Number(result?.updatedAt) || row?.updatedAt,
-              },
+              ...row,
+              folderId: resultFolderId,
+              folderPath: resultFolderPath,
+              updatedAt: Number(result?.updatedAt) || row?.updatedAt,
+            },
         ),
       );
       setSelectedMeta((prev) =>
         !prev || String(prev?.id || '').trim() !== scheduleId
           ? prev
           : {
-              ...prev,
-              folderId: resultFolderId,
-              folderPath: resultFolderPath,
-              updatedAt: Number(result?.updatedAt) || prev?.updatedAt,
-            },
+            ...prev,
+            folderId: resultFolderId,
+            folderPath: resultFolderPath,
+            updatedAt: Number(result?.updatedAt) || prev?.updatedAt,
+          },
       );
       setListReloadToken((v) => v + 1);
     } catch (error) {
@@ -507,15 +494,16 @@ function PublicSchedules({
 
         {foldersError && <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{foldersError}</div>}
 
-        <div className="custom-scrollbar max-h-[36vh] overflow-y-auto px-2 py-3">
+        <div className="custom-scrollbar max-h-[50vh] overflow-y-auto px-3 py-3">
           <button
             type="button"
             onClick={() => setSelectedFolderId(ALL_FOLDERS_ID)}
-            className={`mb-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
-              selectedFolderId === ALL_FOLDERS_ID ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
-            }`}
+            className={`mb-1.5 flex w-full items-center justify-between rounded-xl px-4 py-2.5 text-sm transition-all duration-200 ${selectedFolderId === ALL_FOLDERS_ID
+                ? 'bg-blue-600 font-bold text-white shadow-md shadow-blue-500/20'
+                : 'text-slate-600 font-medium hover:bg-slate-100 hover:text-slate-900'
+              }`}
           >
-            <span className="font-semibold">전체</span>
+            <span>전체 일정</span>
           </button>
           {supportsFolders &&
             folders.map((folder) => (
@@ -523,22 +511,26 @@ function PublicSchedules({
                 key={folder.id}
                 type="button"
                 onClick={() => setSelectedFolderId(folder.id)}
-                className={`mb-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
-                  selectedFolderId === folder.id ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-                style={{ paddingLeft: `${12 + (folder.depth - 1) * 14}px` }}
+                className={`mb-1 flex w-full items-center justify-between rounded-xl px-4 py-2 text-sm transition-all duration-200 ${selectedFolderId === folder.id
+                    ? 'bg-blue-50 font-bold text-blue-700 ring-1 ring-inset ring-blue-500/20'
+                    : 'text-slate-600 font-medium hover:bg-slate-100 hover:text-slate-900'
+                  }`}
+                style={{ paddingLeft: `${16 + (folder.depth - 1) * 16}px` }}
               >
                 <span className="truncate">{folder.name}</span>
-                <span className="text-[11px] text-slate-400">{folder.projectCount}</span>
+                <span className={`text-[11px] px-2 py-0.5 rounded-full ${selectedFolderId === folder.id ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400'}`}>
+                  {folder.projectCount}
+                </span>
               </button>
             ))}
           {supportsFolders && (
             <button
               type="button"
               onClick={() => setSelectedFolderId(PUBLIC_UNCATEGORIZED_FOLDER_ID)}
-              className={`mb-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
-                selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
-              }`}
+              className={`mb-1.5 mt-2 flex w-full items-center justify-between rounded-xl px-4 py-2 text-sm transition-all duration-200 ${selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID
+                  ? 'bg-blue-50 font-bold text-blue-700 ring-1 ring-inset ring-blue-500/20'
+                  : 'text-slate-600 font-medium hover:bg-slate-100 hover:text-slate-900'
+                }`}
             >
               <span>미분류</span>
             </button>
@@ -564,15 +556,15 @@ function PublicSchedules({
         <section className="glass-panel flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="border-b border-slate-200/70 px-5 py-4">
             <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                <Search size={16} />
+              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+                <Search size={18} />
               </span>
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={`검색 (${selectedFolderDisplayName})`}
-                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                className="w-full rounded-2xl border-0 bg-slate-100/80 py-3 pl-11 pr-4 text-sm outline-none ring-1 ring-inset ring-slate-200/50 transition-all duration-300 placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-blue-500 focus:shadow-md"
               />
             </div>
           </div>
@@ -584,7 +576,7 @@ function PublicSchedules({
             </div>
           )}
 
-          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto divide-y divide-slate-100">
+          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4 bg-slate-50/50">
             {items.length === 0 ? (
               <div className="px-4 py-10 text-center text-sm text-slate-400">
                 {isLoadingList ? '불러오는 중...' : '등록된 공개 일정이 없습니다.'}
@@ -603,49 +595,66 @@ function PublicSchedules({
                 const isMoving = !!movingFolderBySchedule[id];
 
                 return (
-                  <div key={id || name} className={`${isSelected ? 'bg-blue-50/40' : 'bg-transparent'} px-4 py-3`}>
-                    <button
-                      type="button"
-                      onClick={() => openPreview(item)}
-                      className="flex w-full items-start gap-3 rounded-lg px-2 py-1 text-left transition hover:bg-slate-50"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-semibold text-slate-800">{name}</div>
-                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-                          <span>작업 {tasksCount}개</span>
-                          {updatedAt && <span>수정 {updatedAt}</span>}
-                          {!updatedAt && createdAt && <span>등록 {createdAt}</span>}
-                        </div>
-                        {(updatedByEmail || createdByEmail) && (
-                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
-                            {createdByEmail && <span>게시자 {createdByEmail}</span>}
-                            {updatedByEmail && <span>수정자 {updatedByEmail}</span>}
+                  <div key={id || name} className={`interactive-card ${isSelected ? 'ring-2 ring-blue-500' : ''}`}>
+                    <div className="p-5">
+                      <div className="flex w-full items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1 cursor-pointer" onClick={() => openPreview(item)}>
+                          <h3 className="truncate text-lg font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+                            {name}
+                          </h3>
+                          <div className="mt-2 flex items-center flex-wrap gap-x-4 gap-y-2 text-sm text-slate-500">
+                            <span className="flex items-center gap-1.5 font-medium rounded-md bg-blue-50 px-2 py-0.5 text-blue-700">
+                              작업 <strong className="font-bold">{tasksCount}</strong>개
+                            </span>
+                            {updatedAt ? (
+                              <span className="flex items-center gap-1">수정 <time>{updatedAt}</time></span>
+                            ) : createdAt ? (
+                              <span className="flex items-center gap-1">등록 <time>{createdAt}</time></span>
+                            ) : null}
                           </div>
-                        )}
-                      </div>
-                      <span className="pt-0.5 text-xs font-semibold text-blue-700">Preview</span>
-                    </button>
-
-                    {supportsFolders && (
-                      <div className="mt-2 flex items-center gap-2 px-2">
-                        <span className="text-[11px] font-semibold text-slate-500">폴더</span>
-                        <select
-                          value={rowFolderIdValue}
-                          onChange={(e) => {
-                            void changeScheduleFolder(item, e.target.value);
-                          }}
-                          disabled={!canManageFolders || isMoving}
-                          className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                          {(updatedByEmail || createdByEmail) && (
+                            <div className="mt-2 text-xs text-slate-400">
+                              {createdByEmail && <span className="mr-3">게시자: <span className="text-slate-500">{createdByEmail}</span></span>}
+                              {updatedByEmail && <span>최종 수정자: <span className="text-slate-500">{updatedByEmail}</span></span>}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openPreview(item)}
+                          className="flex-shrink-0 flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-blue-600 hover:text-white hover:shadow-md hover:-translate-y-0.5"
                         >
-                          {folderSelectOptions.map((option) => (
-                            <option key={option.id} value={option.id}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                        {isMoving && <span className="text-[11px] text-slate-400">변경 중...</span>}
+                          Preview
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                        </button>
                       </div>
-                    )}
+
+                      {supportsFolders && (
+                        <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                          <div className="flex items-center w-full gap-3">
+                            <label htmlFor={`folder-${id}`} className="flex-shrink-0 text-[11px] font-bold tracking-wide text-slate-400 uppercase bg-slate-50 px-2 py-1 rounded">
+                              폴더 위치
+                            </label>
+                            <select
+                              id={`folder-${id}`}
+                              value={rowFolderIdValue}
+                              onChange={(e) => {
+                                void changeScheduleFolder(item, e.target.value);
+                              }}
+                              disabled={!canManageFolders || isMoving}
+                              className="w-48 max-w-[50%] rounded-lg border-0 bg-transparent py-1.5 pl-3 pr-8 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-200 transition focus:ring-2 focus:ring-inset focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {folderSelectOptions.map((option) => (
+                                <option key={option.id} value={option.id}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                            {isMoving && <span className="animate-pulse text-[11px] font-medium text-amber-500 ml-2">변경 중...</span>}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })
