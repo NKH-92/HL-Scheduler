@@ -1,6 +1,7 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Plus, Search, Trash2, Users } from './Icons';
 import GanttChart from './GanttChart';
+import Dashboard from './Dashboard';
 import Modal from './Modal';
 import {
   PUBLIC_UNCATEGORIZED_FOLDER_ID,
@@ -133,6 +134,7 @@ function PublicSchedules({
 
   const [previewViewMode, setPreviewViewMode] = useState('Week');
   const [previewFilterText, setPreviewFilterText] = useState('');
+  const [previewTab, setPreviewTab] = useState('schedule');
   const [previewZoomSettings, setPreviewZoomSettings] = useState(() => sanitizeZoomSettings(null));
   const [previewRangePadding, setPreviewRangePadding] = useState(() => mergeRangePadding(null));
   const [previewFitSettings, setPreviewFitSettings] = useState(() => sanitizeFitSettings(null));
@@ -288,6 +290,7 @@ function PublicSchedules({
       }));
       setPreviewViewMode('Week');
       setPreviewFilterText('');
+      setPreviewTab('schedule');
       setPreviewZoomSettings(normalized.zoomSettings);
       setPreviewRangePadding(normalized.rangePadding);
       setPreviewFitSettings(normalized.fitSettings);
@@ -304,6 +307,7 @@ function PublicSchedules({
   const openPreview = useCallback(
     (item) => {
       setContentView('preview');
+      setPreviewTab('schedule');
       void loadSchedule(item);
     },
     [loadSchedule],
@@ -321,6 +325,27 @@ function PublicSchedules({
       );
     });
   }, [selectedSchedule, previewFilterText]);
+
+  const previewHistoryItems = useMemo(() => {
+    const meta = selectedMeta && typeof selectedMeta === 'object' ? selectedMeta : {};
+    const folderId = String(meta.folderId ?? meta.folder_id ?? '').trim();
+    const folderPath =
+      String(meta.folderPath ?? meta.folder_path ?? '').trim() ||
+      String(folderPathById.get(folderId || PUBLIC_UNCATEGORIZED_FOLDER_ID) || '').trim() ||
+      (folderId ? folderId : '미분류');
+    const createdAt = formatDateTime(meta.createdAt ?? meta.created_at);
+    const updatedAt = formatDateTime(meta.updatedAt ?? meta.updated_at);
+    const createdBy = String(meta.createdByEmail || meta.created_by_email || '').trim().toLowerCase();
+    const updatedBy = String(meta.updatedByEmail || meta.updated_by_email || '').trim().toLowerCase();
+
+    return [
+      { label: '폴더', value: folderPath || '미분류' },
+      { label: '등록', value: createdAt || '-' },
+      { label: '수정', value: updatedAt || '-' },
+      { label: '게시자', value: createdBy || '-' },
+      { label: '최종 수정자', value: updatedBy || '-' },
+    ];
+  }, [selectedMeta, folderPathById]);
 
   const importSelectedSchedule = () => {
     if (!selectedSchedule || !canImport) return;
@@ -703,56 +728,95 @@ function PublicSchedules({
 
           {selectedSchedule && (
             <>
-              <div className="flex flex-col gap-3 border-b border-slate-200/70 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="w-full lg:max-w-sm">
-                  <label className="field-label">미리보기 필터</label>
-                  <input
-                    type="text"
-                    value={previewFilterText}
-                    onChange={(e) => setPreviewFilterText(e.target.value)}
-                    placeholder="작업명, 부서, 담당자"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                  />
+              <div className="border-b border-slate-200/70 px-5 py-4">
+                <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTab('schedule')}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      previewTab === 'schedule' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    일정
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTab('dashboard')}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      previewTab === 'dashboard' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    대시보드
+                  </button>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <select value={previewViewMode} onChange={(e) => setPreviewViewMode(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-                    <option value="Day">Day</option>
-                    <option value="Week">Week</option>
-                    <option value="Month">Month</option>
-                  </select>
-                  <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
-                    <span className="font-semibold text-slate-500">Zoom</span>
-                    <button type="button" onClick={() => setPreviewZoomSettings((prev) => ({ ...(prev || {}), [previewViewMode]: clampZoom(zoomValue - 10) }))} className="h-6 w-6 rounded border border-slate-200 bg-white font-bold text-slate-600 hover:bg-slate-50">-</button>
-                    <span className="w-12 text-center text-[11px] tabular-nums">{zoomValue}%</span>
-                    <button type="button" onClick={() => setPreviewZoomSettings((prev) => ({ ...(prev || {}), [previewViewMode]: clampZoom(zoomValue + 10) }))} className="h-6 w-6 rounded border border-slate-200 bg-white font-bold text-slate-600 hover:bg-slate-50">+</button>
-                  </div>
-                  <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
-                    <span className="font-semibold text-slate-500">여백</span>
-                    <input type="number" min="0" className="w-12 rounded border border-slate-200 px-1 text-center" value={Number(rangePadding.before) || 0} onChange={(e) => setPreviewRangePadding((prev) => ({ ...mergeRangePadding(prev), [previewViewMode]: { ...mergeRangePadding(prev)[previewViewMode], before: Math.max(0, Number(e.target.value) || 0) } }))} />
-                    <span className="text-slate-400">~</span>
-                    <input type="number" min="0" className="w-12 rounded border border-slate-200 px-1 text-center" value={Number(rangePadding.after) || 0} onChange={(e) => setPreviewRangePadding((prev) => ({ ...mergeRangePadding(prev), [previewViewMode]: { ...mergeRangePadding(prev)[previewViewMode], after: Math.max(0, Number(e.target.value) || 0) } }))} />
-                    <span className="text-slate-400">({rangeUnit})</span>
-                  </div>
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50">
-                    <input type="checkbox" className="accent-blue-600" checked={fitEnabled} onChange={(e) => setPreviewFitSettings((prev) => ({ ...sanitizeFitSettings(prev), [previewViewMode]: { enabled: !!e.target.checked } }))} />
-                    <span className="text-sm font-semibold text-slate-700">화면 맞춤</span>
-                  </label>
+                <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-slate-600 sm:grid-cols-2 lg:grid-cols-5">
+                  {previewHistoryItems.map((item) => (
+                    <div key={item.label} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{item.label}</p>
+                      <p className="mt-1 truncate text-[11px] font-semibold text-slate-700">{item.value}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 p-4">
-                <div className="h-full min-h-[340px] min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
-                  <GanttChart
-                    tasks={filteredPreviewTasks}
-                    vacations={selectedSchedule.vacations}
-                    viewMode={previewViewMode}
-                    rangePadding={rangePadding}
-                    fitEnabled={fitEnabled}
-                    zoom={zoomValue / 100}
-                    compactMode={isMobileViewport}
-                  />
+              {previewTab === 'schedule' ? (
+                <>
+                  <div className="flex flex-col gap-3 border-b border-slate-200/70 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="w-full lg:max-w-sm">
+                      <label className="field-label">미리보기 필터</label>
+                      <input
+                        type="text"
+                        value={previewFilterText}
+                        onChange={(e) => setPreviewFilterText(e.target.value)}
+                        placeholder="작업명, 부서, 담당자"
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <select value={previewViewMode} onChange={(e) => setPreviewViewMode(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                        <option value="Day">Day</option>
+                        <option value="Week">Week</option>
+                        <option value="Month">Month</option>
+                      </select>
+                      <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        <span className="font-semibold text-slate-500">Zoom</span>
+                        <button type="button" onClick={() => setPreviewZoomSettings((prev) => ({ ...(prev || {}), [previewViewMode]: clampZoom(zoomValue - 10) }))} className="h-6 w-6 rounded border border-slate-200 bg-white font-bold text-slate-600 hover:bg-slate-50">-</button>
+                        <span className="w-12 text-center text-[11px] tabular-nums">{zoomValue}%</span>
+                        <button type="button" onClick={() => setPreviewZoomSettings((prev) => ({ ...(prev || {}), [previewViewMode]: clampZoom(zoomValue + 10) }))} className="h-6 w-6 rounded border border-slate-200 bg-white font-bold text-slate-600 hover:bg-slate-50">+</button>
+                      </div>
+                      <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        <span className="font-semibold text-slate-500">여백</span>
+                        <input type="number" min="0" className="w-12 rounded border border-slate-200 px-1 text-center" value={Number(rangePadding.before) || 0} onChange={(e) => setPreviewRangePadding((prev) => ({ ...mergeRangePadding(prev), [previewViewMode]: { ...mergeRangePadding(prev)[previewViewMode], before: Math.max(0, Number(e.target.value) || 0) } }))} />
+                        <span className="text-slate-400">~</span>
+                        <input type="number" min="0" className="w-12 rounded border border-slate-200 px-1 text-center" value={Number(rangePadding.after) || 0} onChange={(e) => setPreviewRangePadding((prev) => ({ ...mergeRangePadding(prev), [previewViewMode]: { ...mergeRangePadding(prev)[previewViewMode], after: Math.max(0, Number(e.target.value) || 0) } }))} />
+                        <span className="text-slate-400">({rangeUnit})</span>
+                      </div>
+                      <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50">
+                        <input type="checkbox" className="accent-blue-600" checked={fitEnabled} onChange={(e) => setPreviewFitSettings((prev) => ({ ...sanitizeFitSettings(prev), [previewViewMode]: { enabled: !!e.target.checked } }))} />
+                        <span className="text-sm font-semibold text-slate-700">화면 맞춤</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="min-h-0 flex-1 p-4">
+                    <div className="h-full min-h-[340px] min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                      <GanttChart
+                        tasks={filteredPreviewTasks}
+                        vacations={selectedSchedule.vacations}
+                        viewMode={previewViewMode}
+                        rangePadding={rangePadding}
+                        fitEnabled={fitEnabled}
+                        zoom={zoomValue / 100}
+                        compactMode={isMobileViewport}
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
+                  <Dashboard tasks={selectedSchedule.tasks} projectName={selectedSchedule.name} />
                 </div>
-              </div>
+              )}
             </>
           )}
         </section>
