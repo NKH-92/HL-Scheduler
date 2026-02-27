@@ -53,6 +53,8 @@ const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
 const MAX_IMPORT_TASKS = 5000;
 const MAX_IMPORT_VACATIONS = 2000;
 const MAX_PUBLIC_UPLOAD_TEXT_LENGTH = 1024 * 1024;
+const UTF8_ENCODER = new TextEncoder();
+const getUtf8ByteLength = (value) => UTF8_ENCODER.encode(String(value ?? '')).length;
 
 const buildFolderSelectOptions = (rows) => buildFolderSelectOptionsBase(rows, PUBLIC_UNCATEGORIZED_FOLDER_ID);
 let imageExportLibsPromise = null;
@@ -1526,8 +1528,9 @@ function App() {
         }
 
         const payloadText = JSON.stringify(payload);
-        if (payloadText.length > MAX_PUBLIC_UPLOAD_TEXT_LENGTH) {
-          const currentKb = Math.round(payloadText.length / 1024);
+        const payloadBytes = getUtf8ByteLength(payloadText);
+        if (payloadBytes > MAX_PUBLIC_UPLOAD_TEXT_LENGTH) {
+          const currentKb = Math.round(payloadBytes / 1024);
           const maxKb = Math.round(MAX_PUBLIC_UPLOAD_TEXT_LENGTH / 1024);
           void alertAsync(
             `업로드 데이터 크기가 서버 제한을 초과했습니다. (현재 약 ${currentKb}KB / 최대 ${maxKb}KB)\n작업/휴가 수를 줄이거나 메모 내용을 정리한 뒤 다시 시도해주세요.`,
@@ -1876,5 +1879,4 @@ function App() {
 }
 
 export default App;
-
 

@@ -24,10 +24,10 @@
 - **Build Tool**: Vite
 - **Styling**: Tailwind CSS (PostCSS)
 - **State Management**: React Hooks (State, Context, Effects)
-- **Network / API**: Axios, Fetch API
-- **Icons**: Lucide React / Custom SVG
+- **Network / API**: Fetch API (Cloudflare Worker backend)
+- **Icons**: Custom SVG icon components
 - **Exporting Modules**: `html-to-image`, `html2canvas`, `xlsx` (Excel)
-- **Deployment**: 웹 호스팅(Serverless 혹은 일반 Node.js 정적 호스팅 지원)
+- **Deployment**: Cloudflare Pages + Cloudflare Workers(D1)
 
 ---
 
@@ -73,8 +73,9 @@ npm run build
 │   ├── utils/           # API 통신, 데이터 변환, 로컬 스토리지 등의 유틸 함수
 │   ├── App.jsx          # 메인 랜더링 엔트리 (라우팅/탭 관리)
 │   └── main.jsx         # 애플리케이션 진입점
+├── server/              # Cloudflare Worker + D1 API
 ├── .env                 # API 환경 변수
-├── tailwind.config.js   # Tailwind CSS 설정
+├── tailwind.config.cjs  # Tailwind CSS 설정
 └── vite.config.js       # Vite 빌드 도구 설정
 ```
 

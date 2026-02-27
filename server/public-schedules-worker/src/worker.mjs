@@ -81,7 +81,7 @@ const readJsonObjectBody = async (request, { maxBytes = MAX_JSON_BODY_BYTES } = 
   }
 
   const text = await request.text();
-  if (text.length > maxBytes) {
+  if (new TextEncoder().encode(text).length > maxBytes) {
     return { ok: false, message: 'Payload too large (max ~1MB).' };
   }
 

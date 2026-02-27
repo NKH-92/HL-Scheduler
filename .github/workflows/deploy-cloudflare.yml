@@ -48,13 +48,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run tests
+        run: npm run test
+
       - name: Build web app
         env:
           VITE_APP_ROLE: public
           VITE_PUBLIC_SCHEDULES_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
           VITE_PUBLIC_SCHEDULES_WRITE_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
           VITE_AUTH_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_ADMIN_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
+          VITE_ADMIN_API_BASE: https://hl-scheduler-admin-api.skarhkdgus7.workers.dev
           VITE_PUBLIC_APP_URL: https://hl-scheduler-public.pages.dev
           VITE_ADMIN_APP_URL: https://hl-scheduler-admin.pages.dev
           VITE_SHARED_SCHEDULE_ID: ""
@@ -70,10 +73,10 @@ jobs:
       - name: Build admin web app
         env:
           VITE_APP_ROLE: admin
-          VITE_PUBLIC_SCHEDULES_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_PUBLIC_SCHEDULES_WRITE_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_AUTH_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_ADMIN_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
+          VITE_PUBLIC_SCHEDULES_API_BASE: https://hl-scheduler-admin-api.skarhkdgus7.workers.dev
+          VITE_PUBLIC_SCHEDULES_WRITE_API_BASE: https://hl-scheduler-admin-api.skarhkdgus7.workers.dev
+          VITE_AUTH_API_BASE: https://hl-scheduler-admin-api.skarhkdgus7.workers.dev
+          VITE_ADMIN_API_BASE: https://hl-scheduler-admin-api.skarhkdgus7.workers.dev
           VITE_PUBLIC_APP_URL: https://hl-scheduler-public.pages.dev
           VITE_ADMIN_APP_URL: https://hl-scheduler-admin.pages.dev
           VITE_SHARED_SCHEDULE_ID: ""

@@ -1,6 +1,6 @@
 ﻿# Public Schedules Worker (Cloudflare Workers + D1)
 
-This worker provides public schedule read APIs and admin write APIs for HL-Scheduler web mode.
+This worker provides schedule APIs (read/write), auth APIs, and optional admin-only APIs.
 
 ## API
 
@@ -23,22 +23,25 @@ This worker provides public schedule read APIs and admin write APIs for HL-Sched
 - `CORS_ALLOWED_ORIGINS` (comma-separated, supports `*` wildcard rules)
 - `SHARED_SCHEDULE_ID` (optional; if set, create is blocked and only that ID can be updated)
 - `ALLOWED_FROM_DOMAIN` (ex: `hanlim.com`)
+- `ENABLE_ADMIN_ENDPOINTS=1|0` (enable/disable `/api/admin/*` and folder-admin write endpoints)
 
 `secrets`
 
-- `UPLOAD_KEY` (optional extra write token)
-- `FOLDER_ADMIN_KEY` (optional folder admin key)
+- `PASSWORD_PEPPER` (recommended)
 
 ## Write Access Rules
 
 Write requests are blocked when:
 
 1. `READ_ONLY_MODE=1`
-2. `REQUIRE_ACCESS_EMAIL=1` and `CF-Access-Authenticated-User-Email` is missing
-3. `ALLOWED_ADMIN_EMAILS` is set and email is not in allowlist
-4. `UPLOAD_KEY` is set (legacy mode) and request key is missing/invalid
+2. Authenticated user is missing
+3. Authenticated user is not approved (`status !== approved`)
 
-`UPLOAD_KEY` check is skipped when Access-based auth is enabled (`REQUIRE_ACCESS_EMAIL=1` or `ALLOWED_ADMIN_EMAILS` configured).
+Admin endpoints (`/api/admin/*`, `/api/folders` POST/DELETE, `/api/schedules/:id/folder`) additionally require:
+
+1. `ENABLE_ADMIN_ENDPOINTS=1`
+2. Authenticated admin user (email in `ALLOWED_ADMIN_EMAILS`)
+3. If `REQUIRE_ACCESS_EMAIL=1`, `CF-Access-Authenticated-User-Email` must exist and match the authenticated user
 
 When `SHARED_SCHEDULE_ID` is set:
 
@@ -69,13 +72,10 @@ wrangler.cmd d1 create hl-scheduler
 wrangler.cmd d1 execute hl-scheduler --file=./schema.sql --remote
 ```
 
-5. Set secrets
-
-Optional:
+5. Set secrets (recommended)
 
 ```bash
-wrangler.cmd secret put UPLOAD_KEY
-wrangler.cmd secret put FOLDER_ADMIN_KEY
+wrangler.cmd secret put PASSWORD_PEPPER
 ```
 
 6. Deploy
@@ -86,7 +86,8 @@ wrangler.cmd deploy
 
 ## Recommended Free-Plan Topology
 
-- Public Worker: `READ_ONLY_MODE=1`
-- Admin Worker: `READ_ONLY_MODE=0`, `REQUIRE_ACCESS_EMAIL=1`
+- Public Worker: `READ_ONLY_MODE=0`, `ENABLE_ADMIN_ENDPOINTS=0`
+- Admin Worker: `READ_ONLY_MODE=0`, `ENABLE_ADMIN_ENDPOINTS=1`, `REQUIRE_ACCESS_EMAIL=1`
 - Both bind the same D1 database
-- Protect only admin URLs with Cloudflare Access
+- Public app uses public worker for browse/login/write
+- Admin app uses admin worker for admin page + admin APIs

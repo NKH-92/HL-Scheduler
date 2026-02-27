@@ -3,7 +3,6 @@ const normalizeRole = (value) => (String(value || '').trim().toLowerCase() === '
 
 const WRITE_AUTH_ERROR_MESSAGE = 'Write access denied. Please sign in with an approved account.';
 const ADMIN_AUTH_ERROR_MESSAGE = 'Admin access denied. Sign in with an approved admin account.';
-const AUTH_TOKEN_STORAGE_KEY = 'hl_scheduler_auth_token';
 
 export const PUBLIC_UNCATEGORIZED_FOLDER_ID = '__uncategorized__';
 
@@ -37,26 +36,10 @@ export const isAdminApiEnabled = () => Boolean(getAdminApiBase());
 
 let authToken = '';
 
-try {
-  const saved = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
-  if (saved) authToken = String(saved).trim();
-} catch {
-  // ignore storage failures
-}
-
 export const getPublicSchedulesAuthToken = () => String(authToken || '').trim();
 
 export const setPublicSchedulesAuthToken = (token) => {
   authToken = String(token || '').trim();
-  try {
-    if (authToken) {
-      localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, authToken);
-    } else {
-      localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-    }
-  } catch {
-    // ignore storage failures
-  }
 };
 
 class PublicSchedulesApiError extends Error {
@@ -456,4 +439,4 @@ export const resetAdminUserPassword = async (userId, temporaryPassword) => {
   return data;
 };
 
-export { PublicSchedulesApiError, AUTH_TOKEN_STORAGE_KEY };
+export { PublicSchedulesApiError };
