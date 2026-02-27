@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Plus, Search, Trash2, Users } from './Icons';
+import { Download, Plus, Search, Trash2, Users, XIcon } from './Icons';
 import GanttChart from './GanttChart';
 import Dashboard from './Dashboard';
 import Modal from './Modal';
@@ -500,6 +500,11 @@ function PublicSchedules({
     }
   };
 
+  const closeFolderAdminModal = useCallback(() => {
+    setFolderManageError('');
+    setIsFolderAdminModalOpen(false);
+  }, []);
+
   if (!enabled) {
     return (
       <div className="glass-panel p-6">
@@ -852,21 +857,26 @@ function PublicSchedules({
       {canManageFolders && (
         <Modal
           isOpen={isFolderAdminModalOpen}
-          onClose={() => {
-            setFolderManageError('');
-            setIsFolderAdminModalOpen(false);
-          }}
+          onClose={closeFolderAdminModal}
           ariaLabel="폴더 관리"
-          panelClassName="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+          panelClassName="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden"
         >
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start justify-between gap-3 border-b border-slate-200/70 px-6 py-5">
             <div>
               <h3 className="text-lg font-bold text-slate-900">폴더 관리</h3>
               <p className="mt-1 text-xs text-slate-500">폴더 생성/삭제를 수행합니다.</p>
             </div>
+            <button
+              type="button"
+              onClick={closeFolderAdminModal}
+              className="rounded-full p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+              aria-label="닫기"
+            >
+              <XIcon size={20} />
+            </button>
           </div>
 
-          <div className="mt-5 space-y-3">
+          <div className="space-y-3 px-6 py-5">
             <label className="field-label">새 폴더 이름</label>
             <input
               type="text"
@@ -894,7 +904,17 @@ function PublicSchedules({
             </div>
           </div>
 
-          {folderManageError && <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{folderManageError}</div>}
+          {folderManageError && <div className="mx-6 mb-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{folderManageError}</div>}
+
+          <div className="flex items-center justify-end gap-2 border-t border-slate-200/70 px-6 py-4">
+            <button
+              type="button"
+              onClick={closeFolderAdminModal}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              닫기
+            </button>
+          </div>
         </Modal>
       )}
     </div>
