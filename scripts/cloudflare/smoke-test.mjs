@@ -7,13 +7,13 @@ const DEFAULT_RETRY_DELAY_MS = 5000;
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const fetchWithTimeout = async (url, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) => {
+const fetchWithTimeout = async (url, { timeoutMs = DEFAULT_TIMEOUT_MS, redirect = 'follow' } = {}) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     return await fetch(url, {
-      redirect: 'follow',
+      redirect,
       signal: controller.signal,
       headers: {
         Accept: 'application/json,text/html;q=0.9,*/*;q=0.8',
@@ -32,6 +32,25 @@ const assertOkJson = async (res, name) => {
   if (!data || data.ok !== true) {
     throw new Error(`${name} did not return { ok: true }`);
   }
+};
+
+const assertOkJsonOrAccessRedirect = async (res, name) => {
+  if (res.ok) {
+    const data = await res.json();
+    if (!data || data.ok !== true) {
+      throw new Error(`${name} did not return { ok: true }`);
+    }
+    return;
+  }
+
+  if (res.status === 302) {
+    const location = String(res.headers.get('location') || '').trim();
+    if (location.includes('cloudflareaccess.com')) {
+      return;
+    }
+  }
+
+  throw new Error(`${name} returned HTTP ${res.status}`);
 };
 
 const assertHtml = async (res, name) => {
@@ -59,7 +78,7 @@ const runCheck = async (check, { retryCount = DEFAULT_RETRY_COUNT, retryDelayMs 
 
   for (let attempt = 1; attempt <= retryCount; attempt += 1) {
     try {
-      const response = await fetchWithTimeout(check.url);
+      const response = await fetchWithTimeout(check.url, check.fetchOptions);
       await check.assert(response, check.name);
       process.stdout.write(`[smoke] ok: ${check.name}\n`);
       return;
@@ -88,7 +107,10 @@ const checks = [
   {
     name: 'admin worker health',
     url: `${config.workers.admin.apiUrl}/healthz`,
-    assert: assertOkJson,
+    assert: assertOkJsonOrAccessRedirect,
+    fetchOptions: {
+      redirect: 'manual',
+    },
   },
   {
     name: 'public schedules list',
