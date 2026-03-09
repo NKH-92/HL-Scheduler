@@ -163,11 +163,11 @@ export const getCloudflareDeployConfig = ({ deployEnv: deployEnvInput } = {}) =>
     derivedName: 'CLOUDFLARE_ADMIN_PAGES_PROJECT',
   });
 
-  const d1DatabaseId = requireValue('CLOUDFLARE_D1_DATABASE_ID', process.env.CLOUDFLARE_D1_DATABASE_ID);
+  const d1DatabaseId = trim(process.env.CLOUDFLARE_D1_DATABASE_ID);
   const d1DatabaseName =
     trim(process.env.CLOUDFLARE_D1_DATABASE_NAME) || (deployEnv === 'production' ? 'hl-scheduler' : 'hl-scheduler-staging');
   const previewDatabaseId = trim(process.env.CLOUDFLARE_D1_PREVIEW_DATABASE_ID) || d1DatabaseId;
-  const allowedAdminEmails = requireValue('CLOUDFLARE_ALLOWED_ADMIN_EMAILS', process.env.CLOUDFLARE_ALLOWED_ADMIN_EMAILS);
+  const allowedAdminEmails = trim(process.env.CLOUDFLARE_ALLOWED_ADMIN_EMAILS);
   const allowedFromDomain = trim(process.env.CLOUDFLARE_ALLOWED_FROM_DOMAIN) || 'hanlim.com';
   const sharedScheduleId = trim(process.env.CLOUDFLARE_SHARED_SCHEDULE_ID);
 
