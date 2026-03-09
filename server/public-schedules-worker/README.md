@@ -1,93 +1,75 @@
-﻿# Public Schedules Worker (Cloudflare Workers + D1)
+# Public Schedules Worker (Cloudflare Workers + D1)
 
-This worker provides schedule APIs (read/write), auth APIs, and optional admin-only APIs.
+This worker serves schedule APIs, auth APIs, and admin APIs for the Scheduler app.
 
 ## API
 
+- `GET /healthz`
 - `GET /api/schedules`
 - `GET /api/schedules/:id`
-- `POST /api/schedules` (write)
-- `PUT /api/schedules/:id` (write)
-- `PATCH /api/schedules/:id/folder` (write)
+- `POST /api/schedules`
+- `PUT /api/schedules/:id`
+- `DELETE /api/schedules/:id`
+- `PATCH /api/schedules/:id/folder`
 - `GET /api/folders/tree`
-- `POST /api/folders` (write)
-- `DELETE /api/folders/:id` (write)
+- `POST /api/folders`
+- `DELETE /api/folders/:id`
+- `PATCH /api/folders/:id/order`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/auth/logout`
+- `GET /api/admin/users`
+- `POST /api/admin/users/:id/approve`
+- `POST /api/admin/users/:id/reject`
+- `POST /api/admin/users/:id/reset-password`
 
-## Environment Variables
+## Deployment Model
 
-`[vars]`
+Staging and production are deployed with generated Wrangler configs.
 
-- `READ_ONLY_MODE=1|0`
-- `REQUIRE_ACCESS_EMAIL=1|0`
-- `ALLOWED_ADMIN_EMAILS` (comma-separated)
-- `CORS_ALLOWED_ORIGINS` (comma-separated, supports `*` wildcard rules)
-- `SHARED_SCHEDULE_ID` (optional; if set, create is blocked and only that ID can be updated)
-- `ALLOWED_FROM_DOMAIN` (ex: `hanlim.com`)
-- `ENABLE_ADMIN_ENDPOINTS=1|0` (enable/disable `/api/admin/*` and folder-admin write endpoints)
+- Source template: [wrangler.toml](./wrangler.toml)
+- Generated config: `wrangler.generated.<staging|production>.<public|admin>.toml`
+- Generator: `node scripts/cloudflare/render-wrangler-config.mjs`
+- CI workflow: `.github/workflows/deploy-cloudflare.yml`
 
-`secrets`
+The repository now assumes:
 
-- `PASSWORD_PEPPER` (recommended)
+- `staging` branch -> staging deploy
+- `main` branch -> production deploy
+- staging and production use different D1 databases
+- public and admin workers are deployed separately
 
-## Write Access Rules
-
-Write requests are blocked when:
-
-1. `READ_ONLY_MODE=1`
-2. Authenticated user is missing
-3. Authenticated user is not approved (`status !== approved`)
-
-Admin endpoints (`/api/admin/*`, `/api/folders` POST/DELETE, `/api/schedules/:id/folder`) additionally require:
-
-1. `ENABLE_ADMIN_ENDPOINTS=1`
-2. Authenticated admin user (email in `ALLOWED_ADMIN_EMAILS`)
-3. If `REQUIRE_ACCESS_EMAIL=1`, `CF-Access-Authenticated-User-Email` must exist and match the authenticated user
-
-When `SHARED_SCHEDULE_ID` is set:
-
-- `POST /api/schedules` is blocked
-- `PUT /api/schedules/:id` and `PATCH /api/schedules/:id/folder` only allow that ID
-- `GET /api/schedules` returns only the shared schedule entry
-
-## First Deployment
-
-1. Install/login Wrangler
+## Local Rendering Example
 
 ```bash
-npm.cmd i -g wrangler
-wrangler.cmd login
+set DEPLOY_ENV=staging
+set CLOUDFLARE_D1_DATABASE_ID=replace-with-staging-d1-id
+set CLOUDFLARE_ALLOWED_ADMIN_EMAILS=admin@example.com
+set CLOUDFLARE_WORKERS_SUBDOMAIN=your-subdomain
+node scripts/cloudflare/render-wrangler-config.mjs --surface public
+node scripts/cloudflare/render-wrangler-config.mjs --surface admin
 ```
 
-2. Create D1 (once)
+## Required Runtime Secret
+
+Set `PASSWORD_PEPPER` on both workers before using password auth in a real environment.
+
+Example:
 
 ```bash
-wrangler.cmd d1 create hl-scheduler
+npx wrangler secret put PASSWORD_PEPPER --config server/public-schedules-worker/wrangler.generated.staging.public.toml
+npx wrangler secret put PASSWORD_PEPPER --config server/public-schedules-worker/wrangler.generated.staging.admin.toml
 ```
 
-3. Put `database_id` in `wrangler.toml`
+## Database Setup
 
-4. Apply schema
+Apply the schema to each D1 database:
 
 ```bash
-wrangler.cmd d1 execute hl-scheduler --file=./schema.sql --remote
+npx wrangler d1 execute <database-name> --file=server/public-schedules-worker/schema.sql --remote
 ```
 
-5. Set secrets (recommended)
+Optional follow-up migrations live in `server/public-schedules-worker/migrations/`.
 
-```bash
-wrangler.cmd secret put PASSWORD_PEPPER
-```
-
-6. Deploy
-
-```bash
-wrangler.cmd deploy
-```
-
-## Recommended Free-Plan Topology
-
-- Public Worker: `READ_ONLY_MODE=0`, `ENABLE_ADMIN_ENDPOINTS=0`
-- Admin Worker: `READ_ONLY_MODE=0`, `ENABLE_ADMIN_ENDPOINTS=1`, `REQUIRE_ACCESS_EMAIL=1`
-- Both bind the same D1 database
-- Public app uses public worker for browse/login/write
-- Admin app uses admin worker for admin page + admin APIs
+For the full staging-to-production setup, see `docs/CLOUDFLARE_STAGING_PRODUCTION.md`.

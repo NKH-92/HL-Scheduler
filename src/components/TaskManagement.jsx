@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Download, Edit2, FileText, Plus, Trash2, Upload } from './Icons';
 
 const normalizeValue = (value) => String(value ?? '').trim();
-const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
 function TaskManagement({
   tasks,
@@ -24,7 +23,6 @@ function TaskManagement({
   const [assigneeFilter, setAssigneeFilter] = useState('');
   const [dependencyFilter, setDependencyFilter] = useState('');
   const [startSortDir, setStartSortDir] = useState('');
-  const [memoDrafts, setMemoDrafts] = useState({});
 
   const departments = useMemo(() => {
     const set = new Set();
@@ -107,55 +105,6 @@ function TaskManagement({
       return haystack.includes(query);
     });
   }, [tasks, textFilter, departmentFilter, assigneeFilter, dependencyFilter, taskNameById]);
-
-  useEffect(() => {
-    setMemoDrafts((prev) => {
-      const taskMemoById = new Map(tasks.map((task) => [String(task.id), String(task.memo ?? '')]));
-      let changed = false;
-      const next = {};
-
-      Object.entries(prev).forEach(([taskId, draftMemo]) => {
-        const savedMemo = taskMemoById.get(taskId);
-        if (savedMemo == null) {
-          changed = true;
-          return;
-        }
-        if (draftMemo === savedMemo) {
-          changed = true;
-          return;
-        }
-        next[taskId] = draftMemo;
-      });
-
-      return changed ? next : prev;
-    });
-  }, [tasks]);
-
-  const handleMemoDraftChange = useCallback((taskId, value) => {
-    const safeId = String(taskId);
-    const nextMemo = String(value ?? '');
-    setMemoDrafts((prev) => {
-      if (hasOwn(prev, safeId) && prev[safeId] === nextMemo) return prev;
-      return { ...prev, [safeId]: nextMemo };
-    });
-  }, []);
-
-  const commitMemoDraft = useCallback(
-    (taskId, currentMemo) => {
-      const safeId = String(taskId);
-      if (!hasOwn(memoDrafts, safeId)) return;
-      const draftMemo = memoDrafts[safeId];
-      const savedMemo = String(currentMemo ?? '');
-      if (draftMemo !== savedMemo) updateTaskMemo(safeId, draftMemo);
-
-      setMemoDrafts((prev) => {
-        if (!hasOwn(prev, safeId)) return prev;
-        const { [safeId]: _removed, ...rest } = prev;
-        return rest;
-      });
-    },
-    [memoDrafts, updateTaskMemo],
-  );
 
   const handleMove = (taskId, direction) => {
     if (!textFilter && !departmentFilter && !assigneeFilter && !dependencyFilter) {
@@ -360,8 +309,6 @@ function TaskManagement({
               ) : (
                 visibleTasks.map((task, index) => {
                   const dependencies = formatDependencies(task);
-                  const taskId = String(task.id);
-                  const memoValue = hasOwn(memoDrafts, taskId) ? memoDrafts[taskId] : String(task.memo ?? '');
                   const atTop = index === 0;
                   const atBottom = index === visibleTasks.length - 1;
                   return (
@@ -418,9 +365,8 @@ function TaskManagement({
                       </td>
                       <td className="px-3 py-3 align-top">
                         <textarea
-                          value={memoValue}
-                          onChange={(e) => handleMemoDraftChange(taskId, e.target.value)}
-                          onBlur={() => commitMemoDraft(taskId, task.memo)}
+                          value={String(task.memo ?? '')}
+                          onChange={(e) => updateTaskMemo(task.id, e.target.value)}
                           rows={2}
                           placeholder="작업 메모를 입력하세요"
                           className="w-full min-w-[240px] resize-y rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"

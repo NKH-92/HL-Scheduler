@@ -51,15 +51,14 @@ export const buildFolderSelectOptions = (rows, uncategorizedId) => {
                 label: `${indent}${name}`,
             };
         })
-        .filter(Boolean)
-        .sort((a, b) => a.path.localeCompare(b.path, 'ko'));
+        .filter(Boolean);
 
     return [
         {
             id: uncategorizedId,
             depth: 0,
             path: '',
-            label: '미분류',
+            label: '\uBBF8\uBD84\uB958',
         },
         ...normalized,
     ];

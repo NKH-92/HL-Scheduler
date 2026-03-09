@@ -4,6 +4,12 @@ import GanttChart from './GanttChart';
 import { Save, Search, XIcon } from './Icons';
 import useIsMobileViewport from '../hooks/useIsMobileViewport';
 
+const VIEW_MODE_LABELS = {
+  Day: '일 (Day)',
+  Week: '주 (Week)',
+  Month: '월 (Month)',
+};
+
 function ScheduleView({
   projectName,
   filteredTasks,
@@ -99,7 +105,7 @@ function ScheduleView({
       <section className="glass-panel relative z-20 p-4 lg:p-5 pointer-events-auto">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">Timeline</h2>
+            <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">타임라인 (Timeline)</h2>
             <p className="mt-1 text-sm text-slate-500">{projectName || '프로젝트'} 일정 흐름을 관리하고 조정합니다.</p>
           </div>
 
@@ -118,7 +124,7 @@ function ScheduleView({
             </label>
 
             <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600">
-              <span className="inline-flex h-2.5 w-2.5 rounded-full bg-rose-500" /> Today
+              <span className="inline-flex h-2.5 w-2.5 rounded-full bg-rose-500" /> 오늘 (Today)
               <span className="inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" /> 진행
               <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" /> 완료
             </div>
@@ -216,7 +222,7 @@ function ScheduleView({
                 }`}
                 type="button"
               >
-                {mode}
+                {VIEW_MODE_LABELS[mode] || mode}
               </button>
             ))}
           </div>
@@ -246,7 +252,7 @@ function ScheduleView({
               className={`inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 transition ${
                 isLongDayRange ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-slate-50'
               }`}
-              title={isLongDayRange ? 'Day 범위가 길어 자동으로 비활성화됩니다.' : undefined}
+              title={isLongDayRange ? '일 (Day) 보기 범위가 길어 자동으로 비활성화됩니다.' : undefined}
             >
               <input
                 type="checkbox"
@@ -259,12 +265,12 @@ function ScheduleView({
             </label>
 
             <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
-              <span className="font-semibold text-slate-500">Zoom</span>
+              <span className="font-semibold text-slate-500">배율</span>
               <button
                 type="button"
                 onClick={() => updateZoom(zoomValue - 10)}
                 className="h-6 w-6 rounded border border-slate-200 bg-white font-bold text-slate-600 hover:bg-slate-50"
-                aria-label="Zoom out"
+                aria-label="축소"
               >
                 -
               </button>
@@ -281,7 +287,7 @@ function ScheduleView({
                 type="button"
                 onClick={() => updateZoom(zoomValue + 10)}
                 className="h-6 w-6 rounded border border-slate-200 bg-white font-bold text-slate-600 hover:bg-slate-50"
-                aria-label="Zoom in"
+                aria-label="확대"
               >
                 +
               </button>
@@ -289,7 +295,7 @@ function ScheduleView({
                 type="button"
                 onClick={() => updateZoom(100)}
                 className="h-6 rounded border border-slate-200 bg-white px-2 text-[10px] font-bold tabular-nums text-slate-500 hover:bg-slate-50"
-                title="Zoom 초기화"
+                title="배율 초기화"
               >
                 {zoomValue}%
               </button>
@@ -309,7 +315,7 @@ function ScheduleView({
         {isLongDayRange && (
           <div className="border-b border-sky-100 bg-sky-50/80 px-5 py-3">
             <p className="text-xs font-medium text-sky-800">
-              Day 보기 범위가 365일을 넘어 화면 맞춤이 자동 비활성화되었습니다. 필요하면 Week 또는 Month로 전환하세요.
+              일 (Day) 보기 범위가 365일을 넘어 화면 맞춤이 자동 비활성화되었습니다. 필요하면 주 (Week) 또는 월 (Month)로 전환하세요.
             </p>
           </div>
         )}

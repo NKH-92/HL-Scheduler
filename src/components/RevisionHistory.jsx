@@ -42,10 +42,18 @@ const REVISION_ITEMS = [
       '관리자 전용 대시보드 구축 및 사용자/폴더 관리 편의 기능 대폭 고도화',
     ],
   },
+  {
+    id: 'rev-5-0',
+    title: 'Rev.5.0',
+    content: [
+      '공개 일정 보드 추가 및 폴더 목록 접기/펼치기 지원으로 가시 영역 확대',
+      '공개 일정 보드에서 주간보고서/담당자별 보기 제거 및 요약 카드/여백 재정렬',
+    ],
+  },
 ];
 
 function RevisionHistory() {
-  const [openId, setOpenId] = useState('rev-4-0');
+  const [openId, setOpenId] = useState('rev-5-0');
 
   const toggleItem = (id) => {
     setOpenId((prev) => (prev === id ? '' : id));

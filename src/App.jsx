@@ -40,6 +40,9 @@ import {
   uploadPublicSchedule,
 } from './utils/publicSchedulesApi';
 import { findEmployeeByEmail, getEmployeeDirectory } from './utils/employeeDirectory';
+import { resolvePostAuthNavigation } from './utils/authRedirect';
+import { resolveImportedProjectName, stripUtf8Bom } from './utils/imports';
+import { normalizePublicScheduleStatus } from './utils/publicScheduleStatus';
 import {
   escapeHtml,
   sanitizeFileName,
@@ -1053,7 +1056,7 @@ function App() {
     fileReader.readAsText(file, 'UTF-8');
     fileReader.onload = async (evt) => {
       try {
-        const text = typeof evt.target?.result === 'string' ? evt.target.result : '';
+        const text = stripUtf8Bom(typeof evt.target?.result === 'string' ? evt.target.result : '');
         const parsed = JSON.parse(text);
         if (Array.isArray(parsed)) {
           const tasksRaw = limitArray(parsed, MAX_IMPORT_TASKS);
@@ -1149,7 +1152,7 @@ function App() {
           });
         if (confirmed) {
           setTasks(applyTaskRules(tasksRaw));
-          setProjectName('');
+          setProjectName(resolveImportedProjectName({ sourceName }));
           setVacations([]);
           setRangePadding(mergeRangePadding(null));
           setFitSettings(sanitizeFitSettings(null));
@@ -1187,7 +1190,7 @@ function App() {
           });
         if (confirmed) {
           setTasks(applyTaskRules(tasksRaw));
-          setProjectName(typeof parsed.name === 'string' ? parsed.name : String(sourceName || ''));
+          setProjectName(resolveImportedProjectName({ parsedName: parsed.name, sourceName }));
           setVacations(normalizeVacations(vacationsRaw));
           setRangePadding(mergeRangePadding(parsed.rangePadding));
           setFitSettings(sanitizeFitSettings(parsed.fitSettings));
@@ -1220,6 +1223,9 @@ function App() {
         sourceUpdatedAt,
         sourceFolderId,
         sourceFolderPath,
+        sourceStatus,
+        sourceHoldingReason,
+        sourceNextAction,
         skipConfirm = false,
       } = {},
     ) => {
@@ -1235,6 +1241,9 @@ function App() {
         const safeUpdatedAt = Number(sourceUpdatedAt);
         const safeFolderIdRaw = String(sourceFolderId || '').trim();
         const safeFolderPath = String(sourceFolderPath || '').trim();
+        const safeStatus = normalizePublicScheduleStatus(sourceStatus ?? scheduleData?.status);
+        const safeHoldingReason = String((sourceHoldingReason ?? scheduleData?.holdingReason) || '').trim();
+        const safeNextAction = String((sourceNextAction ?? scheduleData?.nextAction) || '').trim();
         setPublicOrigin(
           safeSourceId
             ? {
@@ -1243,6 +1252,9 @@ function App() {
               updatedAt: Number.isFinite(safeUpdatedAt) ? safeUpdatedAt : null,
               folderId: safeFolderIdRaw || PUBLIC_UNCATEGORIZED_FOLDER_ID,
               folderPath: safeFolderPath,
+              status: safeStatus,
+              holdingReason: safeHoldingReason,
+              nextAction: safeNextAction,
             }
             : null,
         );
@@ -1288,6 +1300,9 @@ function App() {
           sourceUpdatedAt: raw?.updatedAt ?? raw?.updated_at ?? null,
           sourceFolderId: raw?.folderId ?? raw?.folder_id ?? null,
           sourceFolderPath: raw?.folderPath ?? raw?.folder_path ?? '',
+          sourceStatus: raw?.status ?? scheduleData?.status,
+          sourceHoldingReason: raw?.holdingReason ?? scheduleData?.holdingReason,
+          sourceNextAction: raw?.nextAction ?? scheduleData?.nextAction,
           skipConfirm: true,
         });
       } catch (error) {
@@ -1318,27 +1333,15 @@ function App() {
 
   const routeByUserRole = useCallback(
     (user) => {
-      const safeIsAdmin = !!user?.isAdmin;
-      const isAdminApp = appRole === 'admin';
-
-      if (safeIsAdmin) {
-        if (!isAdminApp && adminAppUrl) {
-          window.location.href = adminAppUrl;
-          return;
-        }
-        resetProjectState();
+      const nextRoute = resolvePostAuthNavigation({ user, appRole, adminAppUrl, publicAppUrl });
+      if (nextRoute.action === 'redirect' && nextRoute.url) {
+        window.location.href = nextRoute.url;
         return;
       }
-
-      if (isAdminApp && publicAppUrl) {
-        window.location.href = publicAppUrl;
-        return;
-      }
-
-      setActiveMainTab('browse');
-      setActiveEditorTab('tasks');
+      setActiveMainTab(nextRoute.activeMainTab || 'browse');
+      setActiveEditorTab(nextRoute.activeEditorTab || 'tasks');
     },
-    [appRole, adminAppUrl, publicAppUrl, resetProjectState],
+    [appRole, adminAppUrl, publicAppUrl],
   );
 
   useEffect(() => {
@@ -1443,7 +1446,7 @@ function App() {
   }, [isUploadingPublicSchedule]);
 
   const uploadCurrentProject = useCallback(
-    async ({ title, mode = 'create', folderId, targetId } = {}) => {
+    async ({ title, mode = 'create', folderId, status, holdingReason, nextAction, targetId } = {}) => {
       try {
         if (!isAuthenticated) {
           setIsAuthModalOpen(true);
@@ -1472,6 +1475,9 @@ function App() {
         const requestedMode = mode === 'update' ? 'update' : 'create';
         const safeMode = isSharedScheduleLocked ? 'update' : requestedMode;
         const safeFolderId = String(folderId || '').trim() || PUBLIC_UNCATEGORIZED_FOLDER_ID;
+        const safeStatus = normalizePublicScheduleStatus(status ?? publicOrigin?.status);
+        const safeHoldingReason = String((holdingReason ?? publicOrigin?.holdingReason) || '').trim();
+        const safeNextAction = String((nextAction ?? publicOrigin?.nextAction) || '').trim();
         const safeTargetId = isSharedScheduleLocked ? sharedScheduleId : String(targetId || '').trim();
 
         const knownFolderIds = new Set(
@@ -1507,6 +1513,9 @@ function App() {
         const payload = {
           name: safeTitle,
           folderId: safeFolderId,
+          status: safeStatus,
+          holdingReason: safeHoldingReason,
+          nextAction: safeNextAction,
           tasks,
           vacations,
           rangePadding,
@@ -1545,7 +1554,10 @@ function App() {
             : await uploadPublicSchedule(payload);
 
         const shareUrl = String(result?.url || '').trim();
-        const nextUpdatedAt = Number(result?.updatedAt ?? result?.updated_at);
+	        const nextUpdatedAt = Number(result?.updatedAt ?? result?.updated_at);
+	        const nextStatus = normalizePublicScheduleStatus(result?.status ?? safeStatus);
+	        const nextHoldingReason = String((result?.holdingReason ?? safeHoldingReason) || '').trim();
+	        const nextNextAction = String((result?.nextAction ?? safeNextAction) || '').trim();
 
         if (shareUrl) {
           try {
@@ -1587,11 +1599,14 @@ function App() {
                 : Number.isFinite(ifUnmodifiedAt)
                   ? ifUnmodifiedAt
                   : null,
-              folderId: nextFolderId,
-              folderPath: nextFolderPath,
-            }
-            : null,
-        );
+	              folderId: nextFolderId,
+	              folderPath: nextFolderPath,
+	              status: nextStatus,
+	              holdingReason: nextHoldingReason,
+	              nextAction: nextNextAction,
+	            }
+	            : null,
+	        );
 
         setActiveMainTab('browse');
         setPublicRefreshToken((v) => v + 1);
@@ -1777,6 +1792,9 @@ function App() {
         currentUserEmail={authUser?.email || ''}
         currentUserProfile={authEmployeeProfile}
         defaultFolderId={String(publicOrigin?.folderId || '').trim() || PUBLIC_UNCATEGORIZED_FOLDER_ID}
+        defaultStatus={normalizePublicScheduleStatus(publicOrigin?.status)}
+        defaultHoldingReason={String(publicOrigin?.holdingReason || '').trim()}
+        defaultNextAction={String(publicOrigin?.nextAction || '').trim()}
         folderOptions={publicFolderOptions}
         tasksCount={tasks.length}
         isUploading={isUploadingPublicSchedule || isLoadingPublicFolders}
@@ -1879,4 +1897,3 @@ function App() {
 }
 
 export default App;
-

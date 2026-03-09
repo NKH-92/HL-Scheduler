@@ -1,8 +1,8 @@
 const trimTrailingSlashes = (value) => String(value || '').replace(/\/+$/, '');
 const normalizeRole = (value) => (String(value || '').trim().toLowerCase() === 'admin' ? 'admin' : 'public');
 
-const WRITE_AUTH_ERROR_MESSAGE = 'Write access denied. Please sign in with an approved account.';
-const ADMIN_AUTH_ERROR_MESSAGE = 'Admin access denied. Sign in with an approved admin account.';
+const WRITE_AUTH_ERROR_MESSAGE = '쓰기 권한이 없습니다. 승인된 계정으로 로그인하세요.';
+const ADMIN_AUTH_ERROR_MESSAGE = '관리자 권한이 없습니다. 승인된 관리자 계정으로 로그인하세요.';
 
 export const PUBLIC_UNCATEGORIZED_FOLDER_ID = '__uncategorized__';
 
@@ -64,12 +64,12 @@ const buildApiUrl = (path, { api = 'read' } = {}) => {
   if (!base) {
     const message =
       api === 'admin'
-        ? 'Admin API is not configured. Set VITE_ADMIN_API_BASE and rebuild the app.'
+        ? '관리자 API가 설정되지 않았습니다. VITE_ADMIN_API_BASE를 확인한 뒤 앱을 다시 빌드하세요.'
         : api === 'auth'
-          ? 'Auth API is not configured. Set VITE_AUTH_API_BASE and rebuild the app.'
+          ? '인증 API가 설정되지 않았습니다. VITE_AUTH_API_BASE를 확인한 뒤 앱을 다시 빌드하세요.'
           : api === 'write'
-            ? 'Public schedules write server is not configured. Set VITE_PUBLIC_SCHEDULES_WRITE_API_BASE and rebuild the app.'
-            : 'Public schedules server is not configured. Set VITE_PUBLIC_SCHEDULES_API_BASE and rebuild the app.';
+            ? '공개 일정 쓰기 서버가 설정되지 않았습니다. VITE_PUBLIC_SCHEDULES_WRITE_API_BASE를 확인한 뒤 앱을 다시 빌드하세요.'
+            : '공개 일정 서버가 설정되지 않았습니다. VITE_PUBLIC_SCHEDULES_API_BASE를 확인한 뒤 앱을 다시 빌드하세요.';
     throw new PublicSchedulesApiError(message);
   }
   return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
@@ -91,7 +91,7 @@ const extractResponseErrorMessage = (data, status) => {
     if (message) return String(message);
   }
   if (typeof data === 'string' && data.trim()) return data.trim();
-  return `Request failed (${status})`;
+  return `요청에 실패했습니다 (${status}).`;
 };
 
 const requestJson = async (
@@ -139,10 +139,10 @@ const requestJson = async (
     return data;
   } catch (error) {
     if (error?.name === 'AbortError') {
-      throw new PublicSchedulesApiError('Request timed out.', { status: 0 });
+      throw new PublicSchedulesApiError('요청 시간이 초과되었습니다.', { status: 0 });
     }
     if (error instanceof PublicSchedulesApiError) throw error;
-    throw new PublicSchedulesApiError('Network error.', { status: 0, details: error?.message || String(error) });
+    throw new PublicSchedulesApiError('네트워크 오류가 발생했습니다.', { status: 0, details: error?.message || String(error) });
   } finally {
     window.clearTimeout(timer);
   }
@@ -249,6 +249,22 @@ export const updatePublicSchedule = async (id, payload) => {
   return data;
 };
 
+export const deletePublicSchedule = async (id) => {
+  const safeId = encodeURIComponent(String(id || '').trim());
+  if (!safeId) throw new PublicSchedulesApiError('Invalid schedule id.');
+
+  const data = await requestJson(`/api/schedules/${safeId}`, {
+    method: 'DELETE',
+    api: 'admin',
+    requiresAuth: true,
+  });
+
+  if (!data || typeof data !== 'object') {
+    throw new PublicSchedulesApiError('Invalid schedule delete response from server.', { details: data });
+  }
+  return data;
+};
+
 export const listPublicFoldersTree = async () => {
   const data = await requestJson('/api/folders/tree');
   if (!Array.isArray(data)) {
@@ -289,6 +305,30 @@ export const deletePublicFolder = async (folderId) => {
 
   if (!data || typeof data !== 'object') {
     throw new PublicSchedulesApiError('Invalid folder delete response from server.', { details: data });
+  }
+  return data;
+};
+
+export const reorderPublicFolder = async (folderId, direction) => {
+  const safeId = encodeURIComponent(String(folderId || '').trim());
+  if (!safeId) throw new PublicSchedulesApiError('Invalid folder id.');
+
+  const safeDirection = String(direction || '').trim().toLowerCase();
+  if (safeDirection !== 'up' && safeDirection !== 'down') {
+    throw new PublicSchedulesApiError("Direction must be 'up' or 'down'.");
+  }
+
+  const data = await requestJson(`/api/folders/${safeId}/order`, {
+    method: 'PATCH',
+    api: 'admin',
+    requiresAuth: true,
+    body: JSON.stringify({
+      direction: safeDirection,
+    }),
+  });
+
+  if (!data || typeof data !== 'object') {
+    throw new PublicSchedulesApiError('Invalid folder reorder response from server.', { details: data });
   }
   return data;
 };

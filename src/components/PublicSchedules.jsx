@@ -6,21 +6,76 @@ import Modal from './Modal';
 import {
   PUBLIC_UNCATEGORIZED_FOLDER_ID,
   createPublicFolder,
+  deletePublicSchedule,
   deletePublicFolder,
   getPublicSchedule,
   isPublicSchedulesEnabled,
   listPublicFoldersTree,
   listPublicSchedules,
+  reorderPublicFolder,
+  updatePublicSchedule,
   updatePublicScheduleFolder,
 } from '../utils/publicSchedulesApi';
 import { findEmployeeByEmail, getEmployeeDirectory } from '../utils/employeeDirectory';
 import { normalizeTasks, normalizeVacations } from '../utils/data';
 import { mergeRangePadding, sanitizeFitSettings, sanitizeZoomSettings } from '../utils/schedulerSettings';
 import useIsMobileViewport from '../hooks/useIsMobileViewport';
+import {
+  PUBLIC_SCHEDULE_STATUS_ORDER,
+  getPublicScheduleStatusLabel,
+  normalizePublicScheduleStatus,
+} from '../utils/publicScheduleStatus';
+import {
+  TEAM_LEAD_RISK_FILTERS,
+  buildTeamLeadStats,
+  collectTeamLeadFilterOptions,
+  filterTeamLeadSchedules,
+  formatOverviewDate,
+  getRiskToneClass,
+  normalizeBoardActivity,
+  normalizeBoardOverview,
+  summarizeActivityDate,
+} from '../utils/publicSchedulesBoard';
 import { isPlainObject, clampZoom, buildFolderSelectOptions as buildFolderSelectOptionsBase } from '../utils/shared';
 
 const ALL_FOLDERS_ID = '__all_folders__';
 const PAGE_SIZE = 40;
+const VIEW_MODE_LABELS = {
+  Day: '일 (Day)',
+  Week: '주 (Week)',
+  Month: '월 (Month)',
+};
+const KANBAN_STATUS_TONES = {
+  planning: {
+    shell: 'border-sky-200/80 bg-sky-50/80',
+    header: 'bg-sky-100 text-sky-950',
+    badge: 'bg-sky-600 text-white',
+    cardGlow: 'hover:shadow-sky-100/80',
+  },
+  in_progress: {
+    shell: 'border-emerald-200/80 bg-emerald-50/80',
+    header: 'bg-emerald-100 text-emerald-950',
+    badge: 'bg-emerald-600 text-white',
+    cardGlow: 'hover:shadow-emerald-100/80',
+  },
+  holding: {
+    shell: 'border-amber-200/80 bg-amber-50/80',
+    header: 'bg-amber-100 text-amber-950',
+    badge: 'bg-amber-600 text-white',
+    cardGlow: 'hover:shadow-amber-100/80',
+  },
+  closed: {
+    shell: 'border-slate-200/80 bg-slate-100/80',
+    header: 'bg-slate-200 text-slate-900',
+    badge: 'bg-slate-700 text-white',
+    cardGlow: 'hover:shadow-slate-200/80',
+  },
+};
+const KANBAN_COLUMNS = PUBLIC_SCHEDULE_STATUS_ORDER.map((status) => ({
+  id: status,
+  label: getPublicScheduleStatusLabel(status),
+  tone: KANBAN_STATUS_TONES[status],
+}));
 
 const formatDateTime = (value) => {
   if (value == null) return '';
@@ -50,6 +105,11 @@ const normalizeSchedulePayload = (payload, fallbackName) => {
   if (Array.isArray(payload)) {
     return {
       name: String(fallbackName || '제목 없음').trim() || '제목 없음',
+      status: normalizePublicScheduleStatus(null),
+      holdingReason: '',
+      nextAction: '',
+      activityLog: [],
+      overview: normalizeBoardOverview(null),
       tasks: normalizeTasks(payload),
       vacations: [],
       rangePadding: mergeRangePadding(null),
@@ -64,6 +124,11 @@ const normalizeSchedulePayload = (payload, fallbackName) => {
 
   return {
     name: String(payload.name || fallbackName || '제목 없음').trim() || '제목 없음',
+    status: normalizePublicScheduleStatus(payload.status),
+    holdingReason: String(payload.holdingReason || '').trim(),
+    nextAction: String(payload.nextAction || '').trim(),
+    activityLog: normalizeBoardActivity(payload.activityLog || payload.recentActivity || []),
+    overview: normalizeBoardOverview(payload),
     tasks: normalizeTasks(payload.tasks || []),
     vacations: normalizeVacations(payload.vacations || []),
     rangePadding: mergeRangePadding(payload.rangePadding),
@@ -90,8 +155,7 @@ const normalizeFolderNodes = (rows) =>
         projectCount: Number(row?.projectCount) || 0,
       };
     })
-    .filter(Boolean)
-    .sort((a, b) => a.path.localeCompare(b.path, 'ko'));
+    .filter(Boolean);
 
 const buildFolderSelectOptions = (folders) => buildFolderSelectOptionsBase(
   folders.map((folder) => ({
@@ -130,9 +194,12 @@ function PublicSchedules({
   const [folders, setFolders] = useState([]);
   const [supportsFolders, setSupportsFolders] = useState(true);
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
+  const [hasAttemptedFolderLoad, setHasAttemptedFolderLoad] = useState(false);
   const [foldersError, setFoldersError] = useState('');
-  const [selectedFolderId, setSelectedFolderId] = useState(ALL_FOLDERS_ID);
+  const [selectedFolderId, setSelectedFolderId] = useState('');
+  const [hasInitializedFolderSelection, setHasInitializedFolderSelection] = useState(false);
   const [listReloadToken, setListReloadToken] = useState(0);
+  const [isFolderPanelCollapsed, setIsFolderPanelCollapsed] = useState(false);
 
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderParentId, setNewFolderParentId] = useState('');
@@ -140,7 +207,16 @@ function PublicSchedules({
   const [isDeletingFolder, setIsDeletingFolder] = useState(false);
   const [folderManageError, setFolderManageError] = useState('');
   const [isFolderAdminModalOpen, setIsFolderAdminModalOpen] = useState(false);
+  const [movingFolderId, setMovingFolderId] = useState('');
   const [movingFolderBySchedule, setMovingFolderBySchedule] = useState(() => ({}));
+  const [updatingStatusBySchedule, setUpdatingStatusBySchedule] = useState(() => ({}));
+  const [savingMetaBySchedule, setSavingMetaBySchedule] = useState(() => ({}));
+  const [holdingReasonDrafts, setHoldingReasonDrafts] = useState(() => ({}));
+  const [nextActionDrafts, setNextActionDrafts] = useState(() => ({}));
+  const [deletingScheduleId, setDeletingScheduleId] = useState('');
+  const [teamLeadAssigneeFilter, setTeamLeadAssigneeFilter] = useState('');
+  const [teamLeadDepartmentFilter, setTeamLeadDepartmentFilter] = useState('');
+  const [teamLeadRiskFilter, setTeamLeadRiskFilter] = useState('all');
 
   const [contentView, setContentView] = useState('list');
   const [selectedId, setSelectedId] = useState('');
@@ -176,6 +252,27 @@ function PublicSchedules({
     return selected?.path || selected?.name || '전체';
   }, [supportsFolders, selectedFolderId, folders]);
 
+  const folderMoveStateById = useMemo(() => {
+    const grouped = new Map();
+    folders.forEach((folder) => {
+      const key = String(folder?.parentId || '').trim();
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(folder);
+    });
+
+    const stateById = new Map();
+    grouped.forEach((siblings) => {
+      siblings.forEach((folder, index) => {
+        stateById.set(folder.id, {
+          canMoveUp: index > 0,
+          canMoveDown: index < siblings.length - 1,
+        });
+      });
+    });
+
+    return stateById;
+  }, [folders]);
+
   const loadFolders = useCallback(async () => {
     if (!enabled) return;
     setIsLoadingFolders(true);
@@ -194,6 +291,7 @@ function PublicSchedules({
       }
     } finally {
       setIsLoadingFolders(false);
+      setHasAttemptedFolderLoad(true);
     }
   }, [enabled]);
 
@@ -214,11 +312,22 @@ function PublicSchedules({
 
   useEffect(() => {
     if (!supportsFolders) return;
-    if (selectedFolderId === ALL_FOLDERS_ID || selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID) return;
-    if (!folders.some((folder) => folder.id === selectedFolderId)) {
-      setSelectedFolderId(ALL_FOLDERS_ID);
+    if (!hasAttemptedFolderLoad) return;
+    const defaultFolderId = folders[0]?.id || PUBLIC_UNCATEGORIZED_FOLDER_ID;
+    if (!hasInitializedFolderSelection) {
+      setSelectedFolderId(defaultFolderId);
+      setHasInitializedFolderSelection(true);
+      return;
     }
-  }, [supportsFolders, selectedFolderId, folders]);
+    if (!selectedFolderId || selectedFolderId === ALL_FOLDERS_ID) {
+      setSelectedFolderId(defaultFolderId);
+      return;
+    }
+    if (selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID) return;
+    if (!folders.some((folder) => folder.id === selectedFolderId)) {
+      setSelectedFolderId(defaultFolderId);
+    }
+  }, [supportsFolders, selectedFolderId, folders, hasInitializedFolderSelection, hasAttemptedFolderLoad]);
 
   const fetchSchedulesPage = useCallback(
     async ({ offset = 0, append = false } = {}) => {
@@ -237,9 +346,9 @@ function PublicSchedules({
           offset,
           ...(folderFilter !== undefined
             ? {
-              folderId: folderFilter,
-              includeDescendants: true,
-            }
+                folderId: folderFilter,
+                includeDescendants: true,
+              }
             : {}),
         });
         if (listRequestIdRef.current !== requestId) return;
@@ -261,7 +370,7 @@ function PublicSchedules({
         setIsLoadingMore(false);
       }
     },
-    [enabled, query, supportsFolders, selectedFolderId],
+    [enabled, query, selectedFolderId, supportsFolders],
   );
 
   useEffect(() => {
@@ -302,8 +411,14 @@ function PublicSchedules({
         ...(prev && typeof prev === 'object' ? prev : {}),
         ...(item && typeof item === 'object' ? item : {}),
         ...(Number.isFinite(rawUpdatedAt) ? { updatedAt: rawUpdatedAt } : {}),
+        status: normalizePublicScheduleStatus(raw?.status ?? item?.status ?? normalized.status),
         folderId: raw?.folderId ?? item?.folderId ?? null,
         folderPath: raw?.folderPath ?? item?.folderPath ?? '',
+        holdingReason: String((raw?.holdingReason ?? item?.holdingReason ?? normalized.holdingReason) || '').trim(),
+        nextAction: String((raw?.nextAction ?? item?.nextAction ?? normalized.nextAction) || '').trim(),
+        recentActivity: normalizeBoardActivity(raw?.recentActivity ?? item?.recentActivity ?? normalized.activityLog),
+        activityLog: normalizeBoardActivity(raw?.activityLog ?? normalized.activityLog),
+        overview: normalizeBoardOverview(raw?.overview ? { overview: raw.overview } : normalized),
       }));
       setPreviewViewMode('Week');
       setPreviewFilterText('');
@@ -352,17 +467,19 @@ function PublicSchedules({
       (folderId ? folderId : '미분류');
     const createdAt = formatDateTime(meta.createdAt ?? meta.created_at);
     const updatedAt = formatDateTime(meta.updatedAt ?? meta.updated_at);
+    const statusLabel = getPublicScheduleStatusLabel(meta.status ?? selectedSchedule?.status);
     const createdByInfo = buildEmployeeDisplay(meta.createdByEmail || meta.created_by_email || '', employeeDirectory);
     const updatedByInfo = buildEmployeeDisplay(meta.updatedByEmail || meta.updated_by_email || '', employeeDirectory);
 
     return [
       { label: '폴더', value: folderPath || '미분류' },
+      { label: '상태', value: statusLabel },
       { label: '등록', value: createdAt || '-' },
       { label: '수정', value: updatedAt || '-' },
       { label: '게시자', value: createdByInfo.profile || createdByInfo.email || '-' },
       { label: '최종 수정자', value: updatedByInfo.profile || updatedByInfo.email || '-' },
     ];
-  }, [selectedMeta, folderPathById, employeeDirectory]);
+  }, [selectedMeta, selectedSchedule, folderPathById, employeeDirectory]);
 
   const importSelectedSchedule = () => {
     if (!selectedSchedule || !canImport) return;
@@ -381,6 +498,9 @@ function PublicSchedules({
         sourceUpdatedAt: selectedMeta?.updatedAt ?? selectedMeta?.updated_at,
         sourceFolderId: selectedMeta?.folderId ?? selectedMeta?.folder_id ?? null,
         sourceFolderPath: selectedMeta?.folderPath ?? selectedMeta?.folder_path ?? '',
+        sourceStatus: selectedMeta?.status ?? selectedSchedule?.status,
+        sourceHoldingReason: selectedMeta?.holdingReason ?? selectedSchedule?.holdingReason ?? '',
+        sourceNextAction: selectedMeta?.nextAction ?? selectedSchedule?.nextAction ?? '',
       },
     );
   };
@@ -443,6 +563,148 @@ function PublicSchedules({
     }
   };
 
+  const moveFolderOrder = async (folder, direction) => {
+    if (!canManageFolders) {
+      setFolderManageError('폴더 순서 변경은 관리자 모드에서만 사용할 수 있습니다.');
+      return;
+    }
+
+    const folderId = String(folder?.id || '').trim();
+    if (!folderId) return;
+
+    const safeDirection = String(direction || '').trim().toLowerCase();
+    const moveState = folderMoveStateById.get(folderId);
+    if (!moveState) {
+      setFolderManageError('선택한 폴더를 찾을 수 없습니다.');
+      return;
+    }
+    if ((safeDirection === 'up' && !moveState.canMoveUp) || (safeDirection === 'down' && !moveState.canMoveDown)) {
+      return;
+    }
+
+    setMovingFolderId(folderId);
+    setFolderManageError('');
+    try {
+      await reorderPublicFolder(folderId, safeDirection);
+      await loadFolders();
+    } catch (error) {
+      setFolderManageError(error?.message || '폴더 순서를 변경하지 못했습니다.');
+    } finally {
+      setMovingFolderId('');
+    }
+  };
+
+  const normalizeScheduleRecord = useCallback((record, patch = {}) => {
+    const base = record && typeof record === 'object' ? record : {};
+    const next = patch && typeof patch === 'object' ? patch : {};
+    const overviewSource = Object.prototype.hasOwnProperty.call(next, 'overview')
+      ? { overview: next.overview }
+      : Object.prototype.hasOwnProperty.call(base, 'overview')
+        ? { overview: base.overview }
+        : null;
+    const activitySource = Object.prototype.hasOwnProperty.call(next, 'activityLog')
+      ? next.activityLog
+      : Object.prototype.hasOwnProperty.call(next, 'recentActivity')
+        ? next.recentActivity
+        : base.activityLog ?? base.recentActivity ?? [];
+
+    const normalized = {
+      ...base,
+      ...next,
+      status: normalizePublicScheduleStatus(next.status ?? base.status),
+      holdingReason: String(next.holdingReason ?? base.holdingReason ?? '').trim(),
+      nextAction: String(next.nextAction ?? base.nextAction ?? '').trim(),
+      recentActivity: normalizeBoardActivity(activitySource).slice(0, 5),
+    };
+
+    if (overviewSource) {
+      normalized.overview = normalizeBoardOverview(overviewSource);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(next, 'activityLog') || Object.prototype.hasOwnProperty.call(base, 'activityLog')) {
+      normalized.activityLog = normalizeBoardActivity(next.activityLog ?? base.activityLog ?? []);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(next, 'updatedAt') || Object.prototype.hasOwnProperty.call(base, 'updatedAt')) {
+      const updatedAt = Number(next.updatedAt ?? next.updated_at ?? base.updatedAt ?? base.updated_at);
+      normalized.updatedAt = Number.isFinite(updatedAt) ? updatedAt : base.updatedAt ?? base.updated_at ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(next, 'createdAt') || Object.prototype.hasOwnProperty.call(base, 'createdAt')) {
+      const createdAt = Number(next.createdAt ?? next.created_at ?? base.createdAt ?? base.created_at);
+      normalized.createdAt = Number.isFinite(createdAt) ? createdAt : base.createdAt ?? base.created_at ?? null;
+    }
+
+    return normalized;
+  }, []);
+
+  const applySchedulePatchLocally = useCallback((scheduleId, patch = {}) => {
+    const safeId = String(scheduleId || '').trim();
+    if (!safeId) return;
+
+    setItems((prev) =>
+      prev.map((row) => (String(row?.id || '').trim() === safeId ? normalizeScheduleRecord(row, patch) : row)),
+    );
+    setSelectedMeta((prev) =>
+      prev && String(prev?.id || '').trim() === safeId ? normalizeScheduleRecord(prev, patch) : prev,
+    );
+    setSelectedSchedule((prev) => {
+      if (!prev || !selectedId || selectedId !== safeId) return prev;
+      return normalizeScheduleRecord(prev, patch);
+    });
+  }, [normalizeScheduleRecord, selectedId]);
+
+  const updateScheduleMeta = useCallback(
+    async (item, patch, { errorMessage = '프로젝트 정보를 저장하지 못했습니다.', stateKey = 'meta' } = {}) => {
+      if (!canManageFolders) {
+        setListError('프로젝트 메타 정보 수정은 관리자 모드에서만 사용할 수 있습니다.');
+        return null;
+      }
+
+      const scheduleId = String(item?.id || '').trim();
+      if (!scheduleId) return null;
+
+      const busySetter =
+        stateKey === 'status'
+          ? setUpdatingStatusBySchedule
+          : stateKey === 'folder'
+            ? setMovingFolderBySchedule
+            : setSavingMetaBySchedule;
+
+      busySetter((prev) => ({ ...prev, [scheduleId]: true }));
+      setListError('');
+
+      try {
+        const result = await updatePublicSchedule(scheduleId, patch);
+        const normalizedPatch = {
+          ...patch,
+          ...result,
+          status: normalizePublicScheduleStatus(result?.status ?? patch?.status ?? item?.status),
+          holdingReason: String(result?.holdingReason ?? patch?.holdingReason ?? item?.holdingReason ?? '').trim(),
+          nextAction: String(result?.nextAction ?? patch?.nextAction ?? item?.nextAction ?? '').trim(),
+          updatedByEmail: result?.updatedByEmail ?? result?.updated_by_email ?? item?.updatedByEmail ?? item?.updated_by_email ?? '',
+          createdByEmail: result?.createdByEmail ?? result?.created_by_email ?? item?.createdByEmail ?? item?.created_by_email ?? '',
+          activityLog: normalizeBoardActivity(result?.activityLog ?? result?.recentActivity ?? item?.activityLog ?? item?.recentActivity ?? []),
+          recentActivity: normalizeBoardActivity(result?.recentActivity ?? result?.activityLog ?? item?.recentActivity ?? item?.activityLog ?? []),
+          overview: result?.overview ?? item?.overview ?? null,
+          updatedAt: Number(result?.updatedAt ?? result?.updated_at ?? item?.updatedAt ?? item?.updated_at),
+        };
+        applySchedulePatchLocally(scheduleId, normalizedPatch);
+        return normalizedPatch;
+      } catch (error) {
+        setListError(error?.message || errorMessage);
+        return null;
+      } finally {
+        busySetter((prev) => {
+          const next = { ...prev };
+          delete next[scheduleId];
+          return next;
+        });
+      }
+    },
+    [applySchedulePatchLocally, canManageFolders],
+  );
+
   const changeScheduleFolder = async (item, nextFolderIdRaw) => {
     if (!canManageFolders) {
       setListError('폴더 이동은 관리자 모드에서만 사용할 수 있습니다.');
@@ -465,29 +727,15 @@ function PublicSchedules({
       const resultFolderSelectValue = resultFolderIdRaw || PUBLIC_UNCATEGORIZED_FOLDER_ID;
       const resultFolderPath =
         String(result?.folderPath || '').trim() || String(folderPathById.get(resultFolderSelectValue) || '').trim();
-
-      setItems((prev) =>
-        prev.map((row) =>
-          String(row?.id || '').trim() !== scheduleId
-            ? row
-            : {
-              ...row,
-              folderId: resultFolderId,
-              folderPath: resultFolderPath,
-              updatedAt: Number(result?.updatedAt) || row?.updatedAt,
-            },
-        ),
-      );
-      setSelectedMeta((prev) =>
-        !prev || String(prev?.id || '').trim() !== scheduleId
-          ? prev
-          : {
-            ...prev,
-            folderId: resultFolderId,
-            folderPath: resultFolderPath,
-            updatedAt: Number(result?.updatedAt) || prev?.updatedAt,
-          },
-      );
+      applySchedulePatchLocally(scheduleId, {
+        folderId: resultFolderId,
+        folderPath: resultFolderPath,
+        updatedAt: Number(result?.updatedAt ?? result?.updated_at),
+        updatedByEmail: result?.updatedByEmail ?? result?.updated_by_email ?? item?.updatedByEmail ?? '',
+        activityLog: normalizeBoardActivity(result?.activityLog ?? result?.recentActivity ?? item?.activityLog ?? item?.recentActivity ?? []),
+        recentActivity: normalizeBoardActivity(result?.recentActivity ?? item?.recentActivity ?? []),
+        overview: result?.overview ?? item?.overview ?? null,
+      });
       setListReloadToken((v) => v + 1);
     } catch (error) {
       setListError(error?.message || '프로젝트 폴더를 변경하지 못했습니다.');
@@ -500,10 +748,469 @@ function PublicSchedules({
     }
   };
 
+  const changeScheduleStatus = async (item, nextStatusRaw) => {
+    if (!canManageFolders) {
+      setListError('칸반 상태 변경은 관리자 모드에서만 사용할 수 있습니다.');
+      return;
+    }
+
+    const scheduleId = String(item?.id || '').trim();
+    if (!scheduleId) return;
+
+    const currentStatus = normalizePublicScheduleStatus(item?.status);
+    const nextStatus = normalizePublicScheduleStatus(nextStatusRaw);
+    if (currentStatus === nextStatus) return;
+
+    await updateScheduleMeta(item, { status: nextStatus }, { errorMessage: '프로젝트 상태를 변경하지 못했습니다.', stateKey: 'status' });
+  };
+
+  const deleteSchedule = async (item) => {
+    if (!canManageFolders) {
+      setListError('일정 삭제는 관리자 모드에서만 사용할 수 있습니다.');
+      return;
+    }
+
+    const scheduleId = String(item?.id || selectedId || '').trim();
+    if (!scheduleId) return;
+
+    const scheduleName = String(item?.name || item?.title || selectedSchedule?.name || selectedMeta?.name || '').trim() || '제목 없음';
+    const doConfirm = typeof onConfirm === 'function'
+      ? () => onConfirm(`일정 '${scheduleName}'을 삭제할까요?`, { title: '삭제 확인', confirmText: '삭제', cancelText: '취소' })
+      : () => Promise.resolve(window.confirm(`일정 '${scheduleName}'을 삭제할까요?`));
+    const confirmed = await doConfirm();
+    if (!confirmed) return;
+
+    setDeletingScheduleId(scheduleId);
+    setListError('');
+    setScheduleError('');
+    try {
+      await deletePublicSchedule(scheduleId);
+      setItems((prev) => prev.filter((row) => String(row?.id || '').trim() !== scheduleId));
+
+      if (selectedId === scheduleId) {
+        setContentView('list');
+        setSelectedId('');
+        setSelectedMeta(null);
+        setSelectedSchedule(null);
+      }
+
+      await loadFolders();
+      setListReloadToken((v) => v + 1);
+    } catch (error) {
+      const message = error?.message || '일정을 삭제하지 못했습니다.';
+      setListError(message);
+      if (selectedId === scheduleId) setScheduleError(message);
+    } finally {
+      setDeletingScheduleId('');
+    }
+  };
+
   const closeFolderAdminModal = useCallback(() => {
     setFolderManageError('');
     setIsFolderAdminModalOpen(false);
   }, []);
+
+  const clearTeamLeadFilters = useCallback(() => {
+    setTeamLeadAssigneeFilter('');
+    setTeamLeadDepartmentFilter('');
+    setTeamLeadRiskFilter('all');
+  }, []);
+  const toggleFolderPanel = useCallback(() => {
+    setIsFolderPanelCollapsed((prev) => !prev);
+  }, []);
+
+  const zoomValue = clampZoom(previewZoomSettings?.[previewViewMode] ?? 100);
+  const rangePadding = previewRangePadding?.[previewViewMode] || { before: 0, after: 0 };
+  const fitEnabled = (previewFitSettings?.[previewViewMode] || {}).enabled || false;
+  const rangeUnit = previewViewMode === 'Day' ? '일' : previewViewMode === 'Week' ? '주' : '개월';
+  const selectedFolderForAdmin = useMemo(
+    () => folders.find((folder) => folder.id === selectedFolderId) || null,
+    [folders, selectedFolderId],
+  );
+  const folderNavigationItems = useMemo(() => {
+    if (!supportsFolders) return [];
+    const base = folders.map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      path: folder.path,
+      depth: folder.depth,
+      projectCount: Number(folder?.projectCount ?? 0) || 0,
+    }));
+    return [
+      ...base,
+      {
+        id: PUBLIC_UNCATEGORIZED_FOLDER_ID,
+        name: '미분류',
+        path: '미분류',
+        depth: 1,
+        projectCount: 0,
+      },
+    ];
+  }, [supportsFolders, folders]);
+  const selectedFolderSummary = useMemo(() => {
+    if (!supportsFolders) {
+      return {
+        id: ALL_FOLDERS_ID,
+        name: '공개 일정',
+        path: '전체 일정',
+        depth: 1,
+        projectCount: items.length,
+      };
+    }
+    if (selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID) {
+      return {
+        id: PUBLIC_UNCATEGORIZED_FOLDER_ID,
+        name: '미분류',
+        path: '미분류',
+        depth: 1,
+        projectCount: items.length,
+      };
+    }
+    return (
+      folderNavigationItems.find((folder) => folder.id === selectedFolderId) || {
+        id: selectedFolderId || ALL_FOLDERS_ID,
+        name: selectedFolderDisplayName,
+        path: selectedFolderDisplayName,
+        depth: 1,
+        projectCount: items.length,
+      }
+    );
+  }, [supportsFolders, selectedFolderId, selectedFolderDisplayName, folderNavigationItems, items.length]);
+
+  const boardItems = useMemo(() => {
+    const safeItems = Array.isArray(items) ? items : [];
+    return safeItems
+      .filter((item) => !sharedModeId || String(item?.id || '').trim() === sharedModeId)
+      .map((item) =>
+        normalizeScheduleRecord(item, {
+          overview: item?.overview ?? null,
+          activityLog: item?.activityLog ?? item?.recentActivity ?? [],
+          recentActivity: item?.recentActivity ?? item?.activityLog ?? [],
+          holdingReason: item?.holdingReason ?? '',
+          nextAction: item?.nextAction ?? '',
+        }),
+      );
+  }, [items, normalizeScheduleRecord, sharedModeId]);
+
+  const teamLeadFilterOptions = useMemo(() => collectTeamLeadFilterOptions(boardItems), [boardItems]);
+
+  useEffect(() => {
+    if (teamLeadAssigneeFilter && !teamLeadFilterOptions.assignees.includes(teamLeadAssigneeFilter)) {
+      setTeamLeadAssigneeFilter('');
+    }
+  }, [teamLeadAssigneeFilter, teamLeadFilterOptions.assignees]);
+
+  useEffect(() => {
+    if (teamLeadDepartmentFilter && !teamLeadFilterOptions.departments.includes(teamLeadDepartmentFilter)) {
+      setTeamLeadDepartmentFilter('');
+    }
+  }, [teamLeadDepartmentFilter, teamLeadFilterOptions.departments]);
+
+  const filteredBoardItems = useMemo(
+    () =>
+      filterTeamLeadSchedules(boardItems, {
+        assignee: teamLeadAssigneeFilter,
+        department: teamLeadDepartmentFilter,
+        risk: teamLeadRiskFilter,
+      }),
+    [boardItems, teamLeadAssigneeFilter, teamLeadDepartmentFilter, teamLeadRiskFilter],
+  );
+
+  const teamLeadStats = useMemo(() => buildTeamLeadStats(filteredBoardItems), [filteredBoardItems]);
+
+  const kanbanColumns = useMemo(() => {
+    const grouped = new Map(PUBLIC_SCHEDULE_STATUS_ORDER.map((status) => [status, []]));
+    filteredBoardItems.forEach((item) => {
+      const status = normalizePublicScheduleStatus(item?.status);
+      grouped.get(status).push(item);
+    });
+    return KANBAN_COLUMNS.map((column) => ({
+      ...column,
+      items: grouped.get(column.id) || [],
+      itemCount: (grouped.get(column.id) || []).length,
+    }));
+  }, [filteredBoardItems]);
+
+  const selectedBoardState = useMemo(
+    () =>
+      normalizeScheduleRecord(
+        {
+          ...(selectedMeta && typeof selectedMeta === 'object' ? selectedMeta : {}),
+          ...(selectedSchedule && typeof selectedSchedule === 'object' ? selectedSchedule : {}),
+        },
+        {
+          overview: selectedSchedule?.overview ?? selectedMeta?.overview ?? null,
+          activityLog: selectedSchedule?.activityLog ?? selectedMeta?.activityLog ?? selectedMeta?.recentActivity ?? [],
+          recentActivity: selectedSchedule?.recentActivity ?? selectedMeta?.recentActivity ?? [],
+          holdingReason: selectedSchedule?.holdingReason ?? selectedMeta?.holdingReason ?? '',
+          nextAction: selectedSchedule?.nextAction ?? selectedMeta?.nextAction ?? '',
+        },
+      ),
+    [normalizeScheduleRecord, selectedMeta, selectedSchedule],
+  );
+
+  const selectedOverview = useMemo(() => normalizeBoardOverview(selectedBoardState), [selectedBoardState]);
+  const selectedActivityLog = useMemo(
+    () => normalizeBoardActivity(selectedBoardState?.activityLog ?? selectedBoardState?.recentActivity ?? []),
+    [selectedBoardState],
+  );
+  const saveHoldingReason = useCallback(
+    async (item) => {
+      const scheduleId = String(item?.id || '').trim();
+      if (!scheduleId) return;
+      const nextValue = String(
+        Object.prototype.hasOwnProperty.call(holdingReasonDrafts, scheduleId)
+          ? holdingReasonDrafts[scheduleId]
+          : item?.holdingReason ?? '',
+      ).trim();
+      const currentValue = String(item?.holdingReason ?? '').trim();
+      if (nextValue === currentValue) return;
+      await updateScheduleMeta(item, { holdingReason: nextValue }, { errorMessage: 'Holding 사유를 저장하지 못했습니다.' });
+    },
+    [holdingReasonDrafts, updateScheduleMeta],
+  );
+
+  const saveNextAction = useCallback(
+    async (item) => {
+      const scheduleId = String(item?.id || '').trim();
+      if (!scheduleId) return;
+      const nextValue = String(
+        Object.prototype.hasOwnProperty.call(nextActionDrafts, scheduleId)
+          ? nextActionDrafts[scheduleId]
+          : item?.nextAction ?? '',
+      ).trim();
+      const currentValue = String(item?.nextAction ?? '').trim();
+      if (nextValue === currentValue) return;
+      await updateScheduleMeta(item, { nextAction: nextValue }, { errorMessage: '다음 액션을 저장하지 못했습니다.' });
+    },
+    [nextActionDrafts, updateScheduleMeta],
+  );
+
+  const renderProjectCard = (item, toneOverride = null) => {
+    const id = String(item?.id || '').trim();
+    const name = String(item?.name || item?.title || '').trim() || '제목 없음';
+    const tasksCount = Number(item?.tasksCount ?? item?.taskCount ?? 0) || 0;
+    const overview = normalizeBoardOverview(item);
+    const recentActivity = normalizeBoardActivity(item?.recentActivity ?? item?.activityLog ?? []);
+    const dueDateLabel = formatOverviewDate(overview.endDate) || '-';
+    const updatedAtLabel =
+      summarizeActivityDate(overview.lastActivityAt || item?.updatedAt || item?.updated_at) ||
+      formatDateTime(item?.updatedAt ?? item?.updated_at) ||
+      '-';
+    const primaryAssignee = overview.primaryAssignee || overview.assignees.join(', ') || '미지정';
+    const departmentLabel = overview.primaryDepartment || overview.departments.join(', ') || '-';
+    const isSelected = selectedId && id && selectedId === id;
+    const rowFolderIdValue = String(item?.folderId || '').trim() || PUBLIC_UNCATEGORIZED_FOLDER_ID;
+    const rowStatusValue = normalizePublicScheduleStatus(item?.status);
+    const isMoving = !!movingFolderBySchedule[id];
+    const isUpdatingStatus = !!updatingStatusBySchedule[id];
+    const isSavingMeta = !!savingMetaBySchedule[id];
+    const holdingReasonValue = Object.prototype.hasOwnProperty.call(holdingReasonDrafts, id)
+      ? holdingReasonDrafts[id]
+      : String(item?.holdingReason || '').trim();
+    const nextActionValue = Object.prototype.hasOwnProperty.call(nextActionDrafts, id)
+      ? nextActionDrafts[id]
+      : String(item?.nextAction || '').trim();
+    const revealClassName = isMobileViewport
+      ? 'mt-4 space-y-3 opacity-100'
+      : 'pointer-events-none mt-0 max-h-0 translate-y-2 overflow-hidden opacity-0 transition-all duration-300 ease-out group-hover:pointer-events-auto group-hover:mt-4 group-hover:max-h-[48rem] group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:mt-4 group-focus-within:max-h-[48rem] group-focus-within:translate-y-0 group-focus-within:opacity-100';
+    const riskToneClass = getRiskToneClass(overview) || 'border-white/70';
+    const tone = toneOverride || KANBAN_STATUS_TONES[rowStatusValue];
+
+    return (
+      <article
+        key={id || name}
+        className={`group rounded-2xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg ${tone?.cardGlow || ''} ${riskToneClass} ${
+          isSelected ? 'ring-2 ring-blue-500/80' : ''
+        }`}
+      >
+        <button type="button" onClick={() => openPreview(item)} className="block w-full text-left">
+          <h4 className="text-sm font-black leading-5 text-slate-900 break-words transition group-hover:text-blue-700 group-focus-within:text-blue-700">
+            {name}
+          </h4>
+        </button>
+
+        <div className={revealClassName}>
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div className="rounded-xl bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Owner</p>
+              <p className="mt-1 font-semibold text-slate-700 break-words">{primaryAssignee}</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Progress</p>
+              <p className="mt-1 font-semibold text-slate-700">{overview.progress}%</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Due</p>
+              <p className="mt-1 font-semibold text-slate-700">{dueDateLabel}</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Updated</p>
+              <p className="mt-1 font-semibold text-slate-700">{updatedAtLabel}</p>
+            </div>
+          </div>
+
+          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full rounded-full bg-slate-900 transition-all" style={{ width: `${Math.max(4, overview.progress)}%` }} />
+          </div>
+
+          <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold">
+            <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-700">작업 {tasksCount}개</span>
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">{departmentLabel}</span>
+            {(overview.riskLabels.length > 0 ? overview.riskLabels : ['정상']).map((riskLabel) => (
+              <span
+                key={`${id}-risk-${riskLabel}`}
+                className={`rounded-full px-2.5 py-1 ${
+                  riskLabel === '지연' || riskLabel === '오늘 마감'
+                    ? 'bg-rose-50 text-rose-700'
+                    : riskLabel === '이번 주 마감' || riskLabel === '오래 미갱신' || riskLabel === '보류'
+                      ? 'bg-amber-50 text-amber-700'
+                      : 'bg-emerald-50 text-emerald-700'
+                }`}
+              >
+                {riskLabel}
+              </span>
+            ))}
+          </div>
+
+          <div className="space-y-2 rounded-2xl border border-slate-100 bg-slate-50/70 p-3 text-[11px]">
+            <div>
+              <p className="font-bold uppercase tracking-wide text-slate-400">Holding</p>
+              {canManageFolders ? (
+                <textarea
+                  value={holdingReasonValue}
+                  onChange={(event) =>
+                    setHoldingReasonDrafts((prev) => ({ ...prev, [id]: event.target.value }))
+                  }
+                  onBlur={() => {
+                    void saveHoldingReason(item);
+                  }}
+                  disabled={isSavingMeta}
+                  placeholder="보류 상태라면 멈춘 이유를 적어주세요."
+                  className="mt-1 min-h-[68px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              ) : (
+                <p className="mt-1 whitespace-pre-wrap break-words text-slate-700">{holdingReasonValue || '-'}</p>
+              )}
+            </div>
+            <div>
+              <p className="font-bold uppercase tracking-wide text-slate-400">Next action</p>
+              {canManageFolders ? (
+                <textarea
+                  value={nextActionValue}
+                  onChange={(event) =>
+                    setNextActionDrafts((prev) => ({ ...prev, [id]: event.target.value }))
+                  }
+                  onBlur={() => {
+                    void saveNextAction(item);
+                  }}
+                  disabled={isSavingMeta}
+                  placeholder="누가 무엇을 하면 다시 진행되는지 적어주세요."
+                  className="mt-1 min-h-[68px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              ) : (
+                <p className="mt-1 whitespace-pre-wrap break-words text-slate-700">{nextActionValue || '-'}</p>
+              )}
+            </div>
+            {isSavingMeta ? <p className="text-[10px] font-semibold text-amber-600">메타 정보 저장 중...</p> : null}
+          </div>
+
+          <div className="rounded-2xl border border-slate-100 bg-white p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Recent activity</p>
+              <span className="text-[10px] font-semibold text-slate-400">{recentActivity.length}건</span>
+            </div>
+            {recentActivity.length === 0 ? (
+              <p className="mt-2 text-[11px] text-slate-400">최근 활동이 없습니다.</p>
+            ) : (
+              <div className="mt-2 space-y-2">
+                {recentActivity.slice(0, 3).map((entry) => {
+                  const actor = buildEmployeeDisplay(entry.actorEmail, employeeDirectory);
+                  return (
+                    <div key={entry.id || `${id}-${entry.at}`} className="rounded-xl bg-slate-50 px-3 py-2">
+                      <p className="text-[11px] font-semibold text-slate-700 break-words">{entry.message}</p>
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        {actor.profile || actor.email || '기록자 없음'} · {summarizeActivityDate(entry.at) || '-'}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+            <button
+              type="button"
+              onClick={() => openPreview(item)}
+              className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-blue-600 hover:text-white"
+            >
+              일정 보기
+            </button>
+            {canManageFolders ? (
+              <button
+                type="button"
+                onClick={() => void deleteSchedule(item)}
+                disabled={deletingScheduleId === id}
+                className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deletingScheduleId === id ? '삭제 중...' : '삭제'}
+              </button>
+            ) : null}
+          </div>
+
+          {canManageFolders ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <label htmlFor={`status-${id}`} className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                  상태
+                </label>
+                <select
+                  id={`status-${id}`}
+                  value={rowStatusValue}
+                  onChange={(event) => {
+                    void changeScheduleStatus(item, event.target.value);
+                  }}
+                  disabled={isUpdatingStatus}
+                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {PUBLIC_SCHEDULE_STATUS_ORDER.map((status) => (
+                    <option key={status} value={status}>
+                      {getPublicScheduleStatusLabel(status)}
+                    </option>
+                  ))}
+                </select>
+                {isUpdatingStatus ? <span className="text-[10px] font-semibold text-amber-600">...</span> : null}
+              </div>
+              {supportsFolders ? (
+                <div className="flex items-center gap-2">
+                  <label htmlFor={`folder-${id}`} className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    폴더
+                  </label>
+                  <select
+                    id={`folder-${id}`}
+                    value={rowFolderIdValue}
+                    onChange={(event) => {
+                      void changeScheduleFolder(item, event.target.value);
+                    }}
+                    disabled={isMoving}
+                    className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {folderSelectOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  {isMoving ? <span className="text-[10px] font-semibold text-amber-600">...</span> : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </article>
+    );
+  };
 
   if (!enabled) {
     return (
@@ -523,239 +1230,327 @@ function PublicSchedules({
     );
   }
 
-  const zoomValue = clampZoom(previewZoomSettings?.[previewViewMode] ?? 100);
-  const rangePadding = previewRangePadding?.[previewViewMode] || { before: 0, after: 0 };
-  const fitEnabled = (previewFitSettings?.[previewViewMode] || {}).enabled || false;
-  const rangeUnit = previewViewMode === 'Day' ? '일' : previewViewMode === 'Week' ? '주' : '개월';
-
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
-      <aside className="glass-panel w-full shrink-0 overflow-hidden lg:w-[320px]">
-        <div className="border-b border-slate-200/70 px-4 py-4">
-          <h2 className="text-base font-bold text-slate-900">폴더 트리</h2>
-          <p className="mt-1 text-xs text-slate-500">
-            {supportsFolders ? (isLoadingFolders ? '폴더 로딩 중...' : `${folders.length}개 폴더`) : '평면 목록 모드'}
-          </p>
-          {sharedModeId && <p className="mt-1 text-[11px] font-semibold text-blue-700">공유 원본 ID 고정 모드: {sharedModeId}</p>}
-        </div>
-
-        {foldersError && <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{foldersError}</div>}
-
-        <div className="custom-scrollbar max-h-[50vh] overflow-y-auto px-3 py-3">
-          <button
-            type="button"
-            onClick={() => setSelectedFolderId(ALL_FOLDERS_ID)}
-            className={`mb-1.5 flex w-full items-center justify-between rounded-xl px-4 py-2.5 text-sm transition-all duration-200 ${selectedFolderId === ALL_FOLDERS_ID
-                ? 'bg-blue-600 font-bold text-white shadow-md shadow-blue-500/20'
-                : 'text-slate-600 font-medium hover:bg-slate-100 hover:text-slate-900'
-              }`}
-          >
-            <span>전체 일정</span>
-          </button>
-          {supportsFolders &&
-            folders.map((folder) => (
-              <button
-                key={folder.id}
-                type="button"
-                onClick={() => setSelectedFolderId(folder.id)}
-                className={`mb-1 flex w-full items-center justify-between rounded-xl px-4 py-2 text-sm transition-all duration-200 ${selectedFolderId === folder.id
-                    ? 'bg-blue-50 font-bold text-blue-700 ring-1 ring-inset ring-blue-500/20'
-                    : 'text-slate-600 font-medium hover:bg-slate-100 hover:text-slate-900'
-                  }`}
-                style={{ paddingLeft: `${16 + (folder.depth - 1) * 16}px` }}
-              >
-                <span className="truncate">{folder.name}</span>
-                <span className={`text-[11px] px-2 py-0.5 rounded-full ${selectedFolderId === folder.id ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400'}`}>
-                  {folder.projectCount}
-                </span>
-              </button>
-            ))}
-          {supportsFolders && (
-            <button
-              type="button"
-              onClick={() => setSelectedFolderId(PUBLIC_UNCATEGORIZED_FOLDER_ID)}
-              className={`mb-1.5 mt-2 flex w-full items-center justify-between rounded-xl px-4 py-2 text-sm transition-all duration-200 ${selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID
-                  ? 'bg-blue-50 font-bold text-blue-700 ring-1 ring-inset ring-blue-500/20'
-                  : 'text-slate-600 font-medium hover:bg-slate-100 hover:text-slate-900'
-                }`}
-            >
-              <span>미분류</span>
-            </button>
-          )}
-        </div>
-
-        <div className="border-t border-slate-200/70 px-4 py-3">
-          <button
-            type="button"
-            disabled={!canManageFolders}
-            onClick={() => {
-              setFolderManageError('');
-              setIsFolderAdminModalOpen(true);
-            }}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            폴더 관리 {canManageFolders ? '' : '(읽기 전용)'}
-          </button>
-        </div>
-      </aside>
-
+    <div className={`flex min-h-0 min-w-0 flex-1 ${contentView === 'list' ? 'flex-col gap-5 lg:flex-row' : 'flex-col gap-4'}`}>
       {contentView === 'list' ? (
-        <section className="glass-panel flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="border-b border-slate-200/70 px-5 py-4">
-            <div className="relative">
-              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
-                <Search size={18} />
-              </span>
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={`검색 (${selectedFolderDisplayName})`}
-                className="w-full rounded-2xl border-0 bg-slate-100/80 py-3 pl-11 pr-4 text-sm outline-none ring-1 ring-inset ring-slate-200/50 transition-all duration-300 placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-blue-500 focus:shadow-md"
-              />
+        <>
+          <aside
+            className={`glass-panel w-full shrink-0 overflow-hidden transition-all duration-300 ${
+              isFolderPanelCollapsed ? 'lg:w-[88px]' : 'lg:w-[320px]'
+            }`}
+          >
+            <div className={`border-b border-slate-200/70 ${isFolderPanelCollapsed ? 'px-3 py-3' : 'px-4 py-4'}`}>
+              <div className={`flex ${isFolderPanelCollapsed ? 'justify-center' : 'items-start justify-between gap-3'}`}>
+                {!isFolderPanelCollapsed ? (
+                  <div className="min-w-0">
+                    <h2 className="text-base font-bold text-slate-900">폴더 목록</h2>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {supportsFolders ? (isLoadingFolders ? '폴더 로딩 중...' : `${folderNavigationItems.length}개 구분`) : '평면 목록 모드'}
+                    </p>
+                    {sharedModeId ? <p className="mt-1 text-[11px] font-semibold text-blue-700">공유 원본 ID 고정 모드: {sharedModeId}</p> : null}
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={toggleFolderPanel}
+                  aria-expanded={!isFolderPanelCollapsed}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  {isFolderPanelCollapsed ? '펼치기' : '접기'}
+                </button>
+              </div>
             </div>
-          </div>
 
-          {listError && <div className="mx-5 mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{listError}</div>}
-          {!canImport && (
-            <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-              로그인 전에는 일정 조회만 가능합니다. 편집/가져오기는 로그인 후 사용할 수 있습니다.
-            </div>
-          )}
-
-          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4 bg-slate-50/50">
-            {items.length === 0 ? (
-              <div className="px-4 py-10 text-center text-sm text-slate-400">
-                {isLoadingList ? '불러오는 중...' : '등록된 공개 일정이 없습니다.'}
+            {isFolderPanelCollapsed ? (
+              <div className="flex h-full flex-col items-center gap-3 px-3 py-4">
+                <div className="w-full rounded-2xl bg-slate-100 px-2 py-3 text-center">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">폴더</p>
+                  <p className="mt-1 text-lg font-black text-slate-900">{folderNavigationItems.length}</p>
+                </div>
+                <button
+                  type="button"
+                  disabled={!canManageFolders}
+                  title={canManageFolders ? '폴더 관리' : '폴더 관리 (읽기 전용)'}
+                  onClick={() => {
+                    setFolderManageError('');
+                    setIsFolderAdminModalOpen(true);
+                  }}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-2 py-2 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  관리
+                </button>
+                {sharedModeId ? (
+                  <div className="w-full rounded-xl bg-blue-50 px-2 py-2 text-center text-[10px] font-semibold text-blue-700">ID 고정</div>
+                ) : null}
               </div>
             ) : (
-              items.map((item) => {
-                const id = String(item?.id || '').trim();
-                const name = String(item?.name || item?.title || '').trim() || '제목 없음';
-                const tasksCount = Number(item?.tasksCount ?? item?.taskCount ?? 0) || 0;
-                const createdAt = formatDateTime(item?.createdAt ?? item?.created_at);
-                const updatedAt = formatDateTime(item?.updatedAt ?? item?.updated_at);
-                const createdByEmail = String(item?.createdByEmail || item?.created_by_email || '').trim().toLowerCase();
-                const updatedByEmail = String(item?.updatedByEmail || item?.updated_by_email || '').trim().toLowerCase();
-                const createdByInfo = buildEmployeeDisplay(createdByEmail, employeeDirectory);
-                const updatedByInfo = buildEmployeeDisplay(updatedByEmail, employeeDirectory);
-                const isSelected = selectedId && id && selectedId === id;
-                const rowFolderIdValue = String(item?.folderId || '').trim() || PUBLIC_UNCATEGORIZED_FOLDER_ID;
-                const isMoving = !!movingFolderBySchedule[id];
+              <>
+                {foldersError && <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{foldersError}</div>}
 
-                return (
-                  <div key={id || name} className={`interactive-card ${isSelected ? 'ring-2 ring-blue-500' : ''}`}>
-                    <div className="p-5">
-                      <div className="flex w-full items-start justify-between gap-4">
-                        <div className="min-w-0 flex-1 cursor-pointer" onClick={() => openPreview(item)}>
-                          <h3 className="truncate text-lg font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
-                            {name}
-                          </h3>
-                          <div className="mt-2 flex items-center flex-wrap gap-x-4 gap-y-2 text-sm text-slate-500">
-                            <span className="flex items-center gap-1.5 font-medium rounded-md bg-blue-50 px-2 py-0.5 text-blue-700">
-                              작업 <strong className="font-bold">{tasksCount}</strong>개
-                            </span>
-                            {updatedAt ? (
-                              <span className="flex items-center gap-1">수정 <time>{updatedAt}</time></span>
-                            ) : createdAt ? (
-                              <span className="flex items-center gap-1">등록 <time>{createdAt}</time></span>
-                            ) : null}
-                          </div>
-                          {(updatedByEmail || createdByEmail) && (
-                            <div className="mt-2 text-xs text-slate-400">
-                              {createdByEmail && (
-                                <span className="mr-3">
-                                  게시자: <span className="text-slate-500">{createdByInfo.profile || createdByInfo.email}</span>
-                                </span>
-                              )}
-                              {updatedByEmail && (
-                                <span>
-                                  최종 수정자: <span className="text-slate-500">{updatedByInfo.profile || updatedByInfo.email}</span>
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
+                <div className="custom-scrollbar max-h-[50vh] overflow-y-auto px-3 py-3">
+                  {folderNavigationItems.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
+                      {isLoadingFolders ? '폴더를 불러오는 중...' : '표시할 폴더가 없습니다.'}
+                    </div>
+                  ) : (
+                    folderNavigationItems.map((folder) => {
+                      const isSelected = selectedFolderId === folder.id;
+                      const projectCount = isSelected ? items.length : Number(folder?.projectCount ?? 0) || 0;
+                      return (
                         <button
+                          key={folder.id}
                           type="button"
-                          onClick={() => openPreview(item)}
-                          className="flex-shrink-0 flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-blue-600 hover:text-white hover:shadow-md hover:-translate-y-0.5"
+                          onClick={() => setSelectedFolderId(folder.id)}
+                          className={`mb-1 flex w-full items-center justify-between rounded-xl px-4 py-2.5 text-sm transition-all duration-200 ${
+                            isSelected
+                              ? 'bg-blue-50 font-bold text-blue-700 ring-1 ring-inset ring-blue-500/20'
+                              : 'font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                          }`}
+                          style={{ paddingLeft: `${16 + (Math.max(1, folder.depth) - 1) * 16}px` }}
                         >
-                          Preview
-                          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                          <span className="truncate">{folder.name}</span>
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] ${isSelected ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400'}`}>
+                            {projectCount}
+                          </span>
                         </button>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="border-t border-slate-200/70 px-4 py-3">
+                  <button
+                    type="button"
+                    disabled={!canManageFolders}
+                    onClick={() => {
+                      setFolderManageError('');
+                      setIsFolderAdminModalOpen(true);
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    폴더 관리 {canManageFolders ? '' : '(읽기 전용)'}
+                  </button>
+                </div>
+              </>
+            )}
+          </aside>
+
+          <section className="glass-panel flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <div className="border-b border-slate-200/70 px-5 py-5">
+              <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+                <div className="min-w-0">
+                  <div className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
+                    <Users size={14} />
+                    공개 일정 보드
+                  </div>
+                  <h2 className="mt-4 text-2xl font-black tracking-tight text-slate-900">{selectedFolderSummary.name}</h2>
+                  <p className="mt-2 max-w-3xl text-sm text-slate-500">
+                    선택한 폴더의 프로젝트를 상태와 위험 신호 중심으로 빠르게 확인할 수 있습니다.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
+                    <div className="rounded-full bg-slate-100 px-3 py-2">폴더 {selectedFolderSummary.path || selectedFolderSummary.name}</div>
+                    <div className="rounded-full bg-slate-100 px-3 py-2">전체 {boardItems.length}개</div>
+                    <div className="rounded-full bg-slate-100 px-3 py-2">표시 {filteredBoardItems.length}개</div>
+                    {sharedModeId ? <div className="rounded-full bg-blue-50 px-3 py-2 text-blue-700">공유 원본 ID 고정: {sharedModeId}</div> : null}
+                  </div>
+                </div>
+
+                <div className="w-full xl:max-w-md">
+                  <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">검색</label>
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+                      <Search size={18} />
+                    </span>
+                    <input
+                      type="text"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder={`${selectedFolderSummary.name} 프로젝트 검색`}
+                      className="w-full rounded-2xl border-0 bg-slate-100/80 py-3 pl-11 pr-4 text-sm outline-none ring-1 ring-inset ring-slate-200/50 transition-all duration-300 placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-blue-500 focus:shadow-md"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3 xl:max-w-3xl">
+                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Project</p>
+                  <p className="mt-2 text-2xl font-black text-slate-900">{teamLeadStats.totalProjects}</p>
+                  <p className="mt-1 text-[11px] text-slate-500">현재 필터 기준</p>
+                </div>
+                <div className="rounded-2xl border border-rose-200 bg-rose-50/70 px-4 py-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-rose-500">Delayed</p>
+                  <p className="mt-2 text-2xl font-black text-rose-700">{teamLeadStats.delayed}</p>
+                  <p className="mt-1 text-[11px] text-rose-600">오늘 마감 {teamLeadStats.dueToday}</p>
+                </div>
+                <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-amber-600">Holding</p>
+                  <p className="mt-2 text-2xl font-black text-amber-700">{teamLeadStats.holding}</p>
+                  <p className="mt-1 text-[11px] text-amber-700">이번 주 마감 {teamLeadStats.dueThisWeek}</p>
+                </div>
+              </div>
+
+              <div className="mt-5 rounded-[26px] border border-slate-200/80 bg-slate-50/70 p-4">
+                <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,0.85fr)_auto]">
+                  <select
+                    value={teamLeadAssigneeFilter}
+                    onChange={(event) => setTeamLeadAssigneeFilter(event.target.value)}
+                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700"
+                  >
+                    <option value="">전체 담당자</option>
+                    {teamLeadFilterOptions.assignees.map((assignee) => (
+                      <option key={assignee} value={assignee}>
+                        {assignee}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={teamLeadDepartmentFilter}
+                    onChange={(event) => setTeamLeadDepartmentFilter(event.target.value)}
+                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700"
+                  >
+                    <option value="">전체 부서</option>
+                    {teamLeadFilterOptions.departments.map((department) => (
+                      <option key={department} value={department}>
+                        {department}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={teamLeadRiskFilter}
+                    onChange={(event) => setTeamLeadRiskFilter(event.target.value)}
+                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700"
+                  >
+                    {TEAM_LEAD_RISK_FILTERS.map((risk) => (
+                      <option key={risk.id} value={risk.id}>
+                        {risk.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={clearTeamLeadFilters}
+                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    필터 초기화
+                  </button>
+                </div>
+
+                {teamLeadStats.assigneeStats.length > 0 ? (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {teamLeadStats.assigneeStats.slice(0, 6).map((assignee) => (
+                      <button
+                        key={`assignee-chip-${assignee.name}`}
+                        type="button"
+                        onClick={() => setTeamLeadAssigneeFilter(assignee.name)}
+                        className={`rounded-full px-3 py-2 text-[11px] font-semibold transition ${
+                          teamLeadAssigneeFilter === assignee.name
+                            ? 'bg-slate-900 text-white'
+                            : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {assignee.name} · {assignee.projectCount}개
+                        {assignee.delayedCount > 0 ? ` · 지연 ${assignee.delayedCount}` : ''}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            {isFolderPanelCollapsed && foldersError ? (
+              <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{foldersError}</div>
+            ) : null}
+            {listError && <div className="mx-5 mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{listError}</div>}
+            {!canImport && (
+              <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+                로그인 전에는 일정 조회만 가능합니다. 편집/가져오기는 로그인 후 사용할 수 있습니다.
+              </div>
+            )}
+
+            <div className="custom-scrollbar min-h-0 flex-1 overflow-x-auto overflow-y-auto bg-[linear-gradient(180deg,rgba(248,250,252,0.96)_0%,rgba(241,245,249,0.82)_100%)] px-4 py-4 sm:px-5 sm:py-5">
+              {filteredBoardItems.length === 0 && !isLoadingList ? (
+                <div className="flex h-full min-h-[420px] items-center justify-center rounded-[28px] border border-dashed border-slate-300 bg-white/70 px-6 text-center text-sm text-slate-400">
+                  현재 필터 조건에 맞는 프로젝트가 없습니다.
+                </div>
+              ) : (
+                <div className="grid h-full min-w-full auto-cols-[minmax(280px,1fr)] grid-flow-col gap-4 xl:auto-cols-[minmax(320px,1fr)]">
+                  {kanbanColumns.map((column) => (
+                    <section
+                      key={`column-${column.id}`}
+                      className={`flex h-full min-h-[460px] min-w-0 flex-col rounded-[28px] border shadow-sm ${column.tone.shell}`}
+                    >
+                      <div className={`m-3 flex items-center justify-between gap-3 rounded-2xl px-4 py-4 ${column.tone.header}`}>
+                        <h3 className="text-lg font-black">{column.label}</h3>
+                        <span className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-bold text-slate-700">{column.itemCount}</span>
                       </div>
 
-                      {supportsFolders && (
-                        <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
-                          <div className="flex items-center w-full gap-3">
-                            <label htmlFor={`folder-${id}`} className="flex-shrink-0 text-[11px] font-bold tracking-wide text-slate-400 uppercase bg-slate-50 px-2 py-1 rounded">
-                              폴더 위치
-                            </label>
-                            <select
-                              id={`folder-${id}`}
-                              value={rowFolderIdValue}
-                              onChange={(e) => {
-                                void changeScheduleFolder(item, e.target.value);
-                              }}
-                              disabled={!canManageFolders || isMoving}
-                              className="w-48 max-w-[50%] rounded-lg border-0 bg-transparent py-1.5 pl-3 pr-8 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-200 transition focus:ring-2 focus:ring-inset focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {folderSelectOptions.map((option) => (
-                                <option key={option.id} value={option.id}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                            {isMoving && <span className="animate-pulse text-[11px] font-medium text-amber-500 ml-2">변경 중...</span>}
+                      <div className="custom-scrollbar flex-1 space-y-3 overflow-y-auto px-3 pb-3">
+                        {column.items.length === 0 ? (
+                          <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 px-4 py-6 text-center text-sm text-slate-400">
+                            {isLoadingList ? '불러오는 중...' : '이 컬럼에는 프로젝트가 없습니다.'}
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {hasMore && (
-            <div className="border-t border-slate-200/70 px-4 py-3">
-              <button
-                type="button"
-                onClick={() => void fetchSchedulesPage({ offset: nextOffset, append: true })}
-                disabled={isLoadingMore || isLoadingList}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isLoadingMore ? '불러오는 중...' : '더 보기'}
-              </button>
+                        ) : (
+                          column.items.map((item) => renderProjectCard(item, column.tone))
+                        )}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </section>
+
+            {hasMore && (
+              <div className="border-t border-slate-200/70 px-4 py-3">
+                <button
+                  type="button"
+                  onClick={() => void fetchSchedulesPage({ offset: nextOffset, append: true })}
+                  disabled={isLoadingMore || isLoadingList}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isLoadingMore ? '불러오는 중...' : '더 보기'}
+                </button>
+              </div>
+            )}
+          </section>
+      </>
       ) : (
         <section className="glass-panel flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex flex-col gap-3 border-b border-slate-200/70 px-5 py-4">
             <button type="button" onClick={() => setContentView('list')} className="inline-flex w-fit items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50">
-              {'<'} 목록으로
+              {'<'} 보드로
             </button>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <h2 className="truncate text-lg font-bold tracking-tight text-slate-900">{selectedSchedule?.name || '미리보기'}</h2>
+                <h2 className="truncate text-lg font-bold tracking-tight text-slate-900">{selectedBoardState?.name || selectedSchedule?.name || '미리보기'}</h2>
                 <p className="mt-1 text-xs text-slate-500">{selectedSchedule ? `작업 ${selectedSchedule.tasks.length}개` : '목록에서 일정을 선택하세요.'}</p>
               </div>
-              <button
-                type="button"
-                onClick={importSelectedSchedule}
-                disabled={!selectedSchedule || !canImport}
-                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                title={!canImport ? '가져오기는 로그인 후 사용할 수 있습니다.' : undefined}
-              >
-                <Download size={18} /> {canImport ? '가져오기' : '가져오기 (로그인 필요)'}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {canManageFolders && (
+                  <button
+                    type="button"
+                    onClick={() => void deleteSchedule(selectedMeta || { id: selectedId, name: selectedSchedule?.name })}
+                    disabled={!selectedSchedule || deletingScheduleId === selectedId}
+                    className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Trash2 size={18} /> {deletingScheduleId === selectedId ? '삭제 중...' : '삭제'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={importSelectedSchedule}
+                  disabled={!selectedSchedule || !canImport}
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  title={!canImport ? '가져오기는 로그인 후 사용할 수 있습니다.' : undefined}
+                >
+                  <Download size={18} /> {canImport ? '가져오기' : '가져오기 (로그인 필요)'}
+                </button>
+              </div>
             </div>
           </div>
 
           {scheduleError && <div className="mx-5 mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{scheduleError}</div>}
-          {!selectedSchedule && !isLoadingSchedule && !scheduleError && <div className="flex-1 px-5 py-8 text-sm text-slate-500">일정을 선택하면 미리보기가 표시됩니다.</div>}
+          {!selectedSchedule && !isLoadingSchedule && !scheduleError && <div className="flex-1 px-5 py-8 text-sm text-slate-500">프로젝트 카드를 선택하면 미리보기가 표시됩니다.</div>}
           {isLoadingSchedule && <div className="flex-1 px-5 py-8 text-sm text-slate-400">일정을 불러오는 중...</div>}
 
           {selectedSchedule && (
@@ -781,13 +1576,137 @@ function PublicSchedules({
                     대시보드
                   </button>
                 </div>
-                <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-slate-600 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-slate-600 sm:grid-cols-2 lg:grid-cols-6">
                   {previewHistoryItems.map((item) => (
                     <div key={item.label} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
                       <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{item.label}</p>
                       <p className="mt-1 truncate text-[11px] font-semibold text-slate-700">{item.value}</p>
                     </div>
                   ))}
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600 lg:grid-cols-5">
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Owner</p>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-700 break-words">
+                      {selectedOverview.primaryAssignee || selectedOverview.assignees.join(', ') || '미지정'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Department</p>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-700 break-words">
+                      {selectedOverview.primaryDepartment || selectedOverview.departments.join(', ') || '-'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Progress</p>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-700">{selectedOverview.progress}%</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Due</p>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-700">{formatOverviewDate(selectedOverview.endDate) || '-'}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Health</p>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-700">
+                      {selectedOverview.riskLabels.length > 0 ? selectedOverview.riskLabels.join(', ') : '정상'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(selectedOverview.riskLabels.length > 0 ? selectedOverview.riskLabels : ['정상']).map((riskLabel) => (
+                    <span
+                      key={`preview-risk-${riskLabel}`}
+                      className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
+                        riskLabel === '지연' || riskLabel === '오늘 마감'
+                          ? 'bg-rose-50 text-rose-700'
+                          : riskLabel === '이번 주 마감' || riskLabel === '오래 미갱신' || riskLabel === '보류'
+                            ? 'bg-amber-50 text-amber-700'
+                            : 'bg-emerald-50 text-emerald-700'
+                      }`}
+                    >
+                      {riskLabel}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.15fr)]">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Holding reason</p>
+                    {canManageFolders ? (
+                      <textarea
+                        value={
+                          Object.prototype.hasOwnProperty.call(holdingReasonDrafts, selectedId)
+                            ? holdingReasonDrafts[selectedId]
+                            : String(selectedBoardState?.holdingReason || '').trim()
+                        }
+                        onChange={(event) =>
+                          setHoldingReasonDrafts((prev) => ({ ...prev, [selectedId]: event.target.value }))
+                        }
+                        onBlur={() => {
+                          void saveHoldingReason(selectedBoardState);
+                        }}
+                        disabled={!!savingMetaBySchedule[selectedId]}
+                        placeholder="보류 상태라면 멈춘 이유를 적어주세요."
+                        className="mt-2 min-h-[112px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                    ) : (
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-700">
+                        {String(selectedBoardState?.holdingReason || '').trim() || '-'}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Next action</p>
+                    {canManageFolders ? (
+                      <textarea
+                        value={
+                          Object.prototype.hasOwnProperty.call(nextActionDrafts, selectedId)
+                            ? nextActionDrafts[selectedId]
+                            : String(selectedBoardState?.nextAction || '').trim()
+                        }
+                        onChange={(event) =>
+                          setNextActionDrafts((prev) => ({ ...prev, [selectedId]: event.target.value }))
+                        }
+                        onBlur={() => {
+                          void saveNextAction(selectedBoardState);
+                        }}
+                        disabled={!!savingMetaBySchedule[selectedId]}
+                        placeholder="누가 무엇을 하면 다시 진행되는지 적어주세요."
+                        className="mt-2 min-h-[112px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                    ) : (
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-700">
+                        {String(selectedBoardState?.nextAction || '').trim() || '-'}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Recent activity</p>
+                      <span className="text-[10px] font-semibold text-slate-400">{selectedActivityLog.length}건</span>
+                    </div>
+                    {selectedActivityLog.length === 0 ? (
+                      <p className="mt-3 text-sm text-slate-400">최근 활동이 없습니다.</p>
+                    ) : (
+                      <div className="mt-3 space-y-2">
+                        {selectedActivityLog.slice(0, 5).map((entry) => {
+                          const actor = buildEmployeeDisplay(entry.actorEmail, employeeDirectory);
+                          return (
+                            <div key={entry.id || `selected-activity-${entry.at}`} className="rounded-xl bg-slate-50 px-3 py-2">
+                              <p className="text-sm font-semibold text-slate-700 break-words">{entry.message}</p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {actor.profile || actor.email || '기록자 없음'} · {summarizeActivityDate(entry.at) || '-'}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -806,12 +1725,12 @@ function PublicSchedules({
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       <select value={previewViewMode} onChange={(e) => setPreviewViewMode(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-                        <option value="Day">Day</option>
-                        <option value="Week">Week</option>
-                        <option value="Month">Month</option>
+                        <option value="Day">{VIEW_MODE_LABELS.Day}</option>
+                        <option value="Week">{VIEW_MODE_LABELS.Week}</option>
+                        <option value="Month">{VIEW_MODE_LABELS.Month}</option>
                       </select>
                       <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
-                        <span className="font-semibold text-slate-500">Zoom</span>
+                        <span className="font-semibold text-slate-500">배율</span>
                         <button type="button" onClick={() => setPreviewZoomSettings((prev) => ({ ...(prev || {}), [previewViewMode]: clampZoom(zoomValue - 10) }))} className="h-6 w-6 rounded border border-slate-200 bg-white font-bold text-slate-600 hover:bg-slate-50">-</button>
                         <span className="w-12 text-center text-[11px] tabular-nums">{zoomValue}%</span>
                         <button type="button" onClick={() => setPreviewZoomSettings((prev) => ({ ...(prev || {}), [previewViewMode]: clampZoom(zoomValue + 10) }))} className="h-6 w-6 rounded border border-slate-200 bg-white font-bold text-slate-600 hover:bg-slate-50">+</button>
@@ -864,7 +1783,7 @@ function PublicSchedules({
           <div className="flex items-start justify-between gap-3 border-b border-slate-200/70 px-6 py-5">
             <div>
               <h3 className="text-lg font-bold text-slate-900">폴더 관리</h3>
-              <p className="mt-1 text-xs text-slate-500">폴더 생성/삭제를 수행합니다.</p>
+              <p className="mt-1 text-xs text-slate-500">폴더 생성, 삭제, 순서 변경을 수행합니다.</p>
             </div>
             <button
               type="button"
@@ -894,13 +1813,76 @@ function PublicSchedules({
                 <option key={folder.id} value={folder.id}>{`${'-- '.repeat(Math.max(0, folder.depth - 1))}${folder.name}`}</option>
               ))}
             </select>
+            <label className="field-label">삭제 대상 폴더</label>
+            <select
+              value={selectedFolderForAdmin?.id || ''}
+              onChange={(e) => setSelectedFolderId(e.target.value || ALL_FOLDERS_ID)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              disabled={isDeletingFolder || !!movingFolderId}
+            >
+              <option value="">(삭제할 폴더 선택)</option>
+              {folders.map((folder) => (
+                <option key={`delete-folder-${folder.id}`} value={folder.id}>
+                  {folder.path}
+                </option>
+              ))}
+            </select>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => void createFolder()} disabled={isCreatingFolder} className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
+              <button type="button" onClick={() => void createFolder()} disabled={isCreatingFolder || !!movingFolderId} className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
                 <Plus size={14} /> {isCreatingFolder ? '생성 중...' : '폴더 생성'}
               </button>
-              <button type="button" onClick={() => void deleteSelectedFolder()} disabled={isDeletingFolder || selectedFolderId === ALL_FOLDERS_ID || selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60">
+	            <button type="button" onClick={() => void deleteSelectedFolder()} disabled={isDeletingFolder || !!movingFolderId || !selectedFolderForAdmin || selectedFolderId === ALL_FOLDERS_ID || selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60">
                 <Trash2 size={14} /> {isDeletingFolder ? '삭제 중...' : '선택 폴더 삭제'}
               </button>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-800">폴더 순서</h4>
+                  <p className="mt-1 text-[11px] text-slate-500">같은 상위 폴더 안에서만 위/아래로 이동할 수 있습니다.</p>
+                </div>
+                {movingFolderId && <span className="text-[11px] font-semibold text-amber-600">변경 중...</span>}
+              </div>
+
+              <div className="custom-scrollbar mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+                {folders.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-4 text-center text-xs text-slate-400">
+                    생성된 폴더가 없습니다.
+                  </div>
+                ) : (
+                  folders.map((folder) => {
+                    const moveState = folderMoveStateById.get(folder.id) || { canMoveUp: false, canMoveDown: false };
+
+                    return (
+                      <div key={`folder-order-${folder.id}`} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                        <div className="min-w-0 flex-1" style={{ paddingLeft: `${Math.max(0, folder.depth - 1) * 14}px` }}>
+                          <p className="truncate text-sm font-semibold text-slate-800">{folder.name}</p>
+                          <p className="mt-0.5 truncate text-[11px] text-slate-500">{folder.path}</p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => void moveFolderOrder(folder, 'up')}
+                            disabled={!moveState.canMoveUp || !!movingFolderId || isCreatingFolder || isDeletingFolder}
+                            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            위로
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void moveFolderOrder(folder, 'down')}
+                            disabled={!moveState.canMoveDown || !!movingFolderId || isCreatingFolder || isDeletingFolder}
+                            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            아래로
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
           </div>
 

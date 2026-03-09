@@ -499,6 +499,25 @@ const capture = async (win, filename) => {
   console.log('[screenshot]', filePath);
 };
 
+const resetScrollPosition = async (win) => {
+  await win.webContents.executeJavaScript(
+    `(() => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+      const selectors = ['main', '[data-scroll-root]', '.custom-scrollbar', '.overflow-auto', '.overflow-y-auto'];
+      selectors.forEach((selector) => {
+        document.querySelectorAll(selector).forEach((node) => {
+          if (node && typeof node.scrollTo === 'function') node.scrollTo(0, 0);
+          if (node) node.scrollTop = 0;
+        });
+      });
+      return true;
+    })()`,
+    true,
+  );
+};
+
 const run = async () => {
   const apiPort = await findAvailablePort(8787);
   const vitePort = await findAvailablePort(5173);
@@ -585,6 +604,8 @@ const run = async () => {
     // 03: task management
     await clickFirstButtonContaining(win, '작업 관리');
     await waitForSelector(win, 'input[placeholder=\"프로젝트 이름을 입력하세요\"]');
+    await waitForSelector(win, 'table tbody tr');
+    await resetScrollPosition(win);
     await delay(700);
     await capture(win, '03_task_management.png');
 
@@ -631,6 +652,7 @@ const run = async () => {
       win,
       `Array.from(document.querySelectorAll('h2')).some((h) => (h.innerText || '').includes('Dashboard'))`,
     );
+    await resetScrollPosition(win);
     await delay(700);
     await capture(win, '08_dashboard.png');
 

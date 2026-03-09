@@ -722,7 +722,7 @@ function GanttChart({
           className="absolute left-0 -translate-x-1/2 bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap leading-none"
           style={{ top: `${HEADER_HEIGHT_PX + 8}px` }}
         >
-          Today
+          오늘 (Today)
         </div>
       </div>
     );
@@ -763,7 +763,7 @@ function GanttChart({
             }`}
             style={{ height: `${HEADER_HEIGHT_PX}px` }}
           >
-            Task &amp; Assignee
+            업무 · 담당자
           </div>
           <div className={`${isExportMode ? 'overflow-visible h-auto' : 'overflow-hidden flex-1 relative'}`}>
             <div ref={leftRowsRef} style={isExportMode ? undefined : { willChange: 'transform' }}>
@@ -1000,7 +1000,7 @@ function GanttChart({
         </div>
         <div className="flex items-center gap-2">
           <div className="w-0.5 h-4 bg-rose-500 border-l border-dashed" />
-          오늘(Today)
+          오늘 (Today)
         </div>
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 bg-rose-100/80 border border-rose-200 rounded" />

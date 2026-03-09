@@ -81,8 +81,8 @@ function ImageExportModal({
 
         <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
           <div>
-            <p className="text-xs font-semibold text-slate-700">Today 표시 포함</p>
-            <p className="text-[11px] text-slate-500">저장 이미지에 Today 기준선을 함께 표시합니다.</p>
+            <p className="text-xs font-semibold text-slate-700">오늘 표시 포함 (Today)</p>
+            <p className="text-[11px] text-slate-500">저장 이미지에 오늘 기준선 (Today)을 함께 표시합니다.</p>
           </div>
           <input
             type="checkbox"

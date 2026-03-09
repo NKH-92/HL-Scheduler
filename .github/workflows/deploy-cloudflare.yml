@@ -1,40 +1,93 @@
-name: Deploy Cloudflare (Workers + Pages)
+name: Deploy Cloudflare (Staging -> Production)
 
 on:
   push:
     branches:
+      - staging
       - main
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment target
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
 
 concurrency:
-  group: deploy-cloudflare-main
+  group: deploy-cloudflare-${{ github.event.inputs.environment || github.ref_name }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  deploy-workers:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      deploy_env: ${{ steps.resolve.outputs.deploy_env }}
+      pages_branch: ${{ steps.resolve.outputs.pages_branch }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Resolve deployment environment
+        id: resolve
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            DEPLOY_ENV="${{ github.event.inputs.environment }}"
+          elif [[ "${{ github.ref_name }}" == "main" ]]; then
+            DEPLOY_ENV="production"
+          elif [[ "${{ github.ref_name }}" == "staging" ]]; then
+            DEPLOY_ENV="staging"
+          else
+            echo "Unsupported ref: ${{ github.ref_name }}" >&2
+            exit 1
+          fi
 
-      - name: Deploy public worker
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy -e public --config server/public-schedules-worker/wrangler.toml
+          if [[ "$DEPLOY_ENV" == "production" ]]; then
+            PAGES_BRANCH="main"
+          else
+            PAGES_BRANCH="staging"
+          fi
 
-      - name: Deploy admin worker
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy -e admin --config server/public-schedules-worker/wrangler.toml
+          echo "deploy_env=$DEPLOY_ENV" >> "$GITHUB_OUTPUT"
+          echo "pages_branch=$PAGES_BRANCH" >> "$GITHUB_OUTPUT"
 
-  deploy-pages:
+  verify:
     runs-on: ubuntu-latest
     needs:
-      - deploy-workers
+      - prepare
+    environment: ${{ needs.prepare.outputs.deploy_env }}
+    env:
+      DEPLOY_ENV: ${{ needs.prepare.outputs.deploy_env }}
+      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}
+      CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+      CLOUDFLARE_D1_DATABASE_NAME: ${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}
+      CLOUDFLARE_D1_PREVIEW_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_PREVIEW_DATABASE_ID }}
+      CLOUDFLARE_PUBLIC_WORKER_NAME: ${{ vars.CLOUDFLARE_PUBLIC_WORKER_NAME }}
+      CLOUDFLARE_ADMIN_WORKER_NAME: ${{ vars.CLOUDFLARE_ADMIN_WORKER_NAME }}
+      CLOUDFLARE_PUBLIC_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PUBLIC_PAGES_PROJECT }}
+      CLOUDFLARE_ADMIN_PAGES_PROJECT: ${{ vars.CLOUDFLARE_ADMIN_PAGES_PROJECT }}
+      CLOUDFLARE_PUBLIC_API_URL: ${{ vars.CLOUDFLARE_PUBLIC_API_URL }}
+      CLOUDFLARE_ADMIN_API_URL: ${{ vars.CLOUDFLARE_ADMIN_API_URL }}
+      CLOUDFLARE_PUBLIC_APP_URL: ${{ vars.CLOUDFLARE_PUBLIC_APP_URL }}
+      CLOUDFLARE_ADMIN_APP_URL: ${{ vars.CLOUDFLARE_ADMIN_APP_URL }}
+      CLOUDFLARE_ALLOWED_ADMIN_EMAILS: ${{ vars.CLOUDFLARE_ALLOWED_ADMIN_EMAILS }}
+      CLOUDFLARE_ALLOWED_FROM_DOMAIN: ${{ vars.CLOUDFLARE_ALLOWED_FROM_DOMAIN }}
+      CLOUDFLARE_CORS_ALLOWED_ORIGINS: ${{ vars.CLOUDFLARE_CORS_ALLOWED_ORIGINS }}
+      CLOUDFLARE_EXTRA_CORS_ALLOWED_ORIGINS: ${{ vars.CLOUDFLARE_EXTRA_CORS_ALLOWED_ORIGINS }}
+      CLOUDFLARE_READ_ONLY_MODE: ${{ vars.CLOUDFLARE_READ_ONLY_MODE }}
+      CLOUDFLARE_SHARED_SCHEDULE_ID: ${{ vars.CLOUDFLARE_SHARED_SCHEDULE_ID }}
+      CLOUDFLARE_SESSION_COOKIE_DOMAIN: ${{ vars.CLOUDFLARE_SESSION_COOKIE_DOMAIN }}
+      CLOUDFLARE_SESSION_COOKIE_NAME: ${{ vars.CLOUDFLARE_SESSION_COOKIE_NAME }}
+      CLOUDFLARE_SESSION_COOKIE_SAME_SITE: ${{ vars.CLOUDFLARE_SESSION_COOKIE_SAME_SITE }}
+      CLOUDFLARE_SESSION_TTL_HOURS: ${{ vars.CLOUDFLARE_SESSION_TTL_HOURS }}
+      CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS }}
+      CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS }}
+      CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL }}
+      CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS }}
+      CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL }}
+      CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,43 +101,196 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
+      - name: Run sanity tests
         run: npm run test
 
-      - name: Build web app
-        env:
-          VITE_APP_ROLE: public
-          VITE_PUBLIC_SCHEDULES_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_PUBLIC_SCHEDULES_WRITE_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_AUTH_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_ADMIN_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_PUBLIC_APP_URL: https://hl-scheduler-public.pages.dev
-          VITE_ADMIN_APP_URL: https://hl-scheduler-admin.pages.dev
-          VITE_SHARED_SCHEDULE_ID: ""
-        run: npm run build
+      - name: Verify public app build
+        run: npm run cf:build:public
+
+      - name: Verify admin app build
+        run: npm run cf:build:admin
+
+  deploy-workers:
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - verify
+    environment: ${{ needs.prepare.outputs.deploy_env }}
+    env:
+      DEPLOY_ENV: ${{ needs.prepare.outputs.deploy_env }}
+      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}
+      CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+      CLOUDFLARE_D1_DATABASE_NAME: ${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}
+      CLOUDFLARE_D1_PREVIEW_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_PREVIEW_DATABASE_ID }}
+      CLOUDFLARE_PUBLIC_WORKER_NAME: ${{ vars.CLOUDFLARE_PUBLIC_WORKER_NAME }}
+      CLOUDFLARE_ADMIN_WORKER_NAME: ${{ vars.CLOUDFLARE_ADMIN_WORKER_NAME }}
+      CLOUDFLARE_PUBLIC_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PUBLIC_PAGES_PROJECT }}
+      CLOUDFLARE_ADMIN_PAGES_PROJECT: ${{ vars.CLOUDFLARE_ADMIN_PAGES_PROJECT }}
+      CLOUDFLARE_PUBLIC_API_URL: ${{ vars.CLOUDFLARE_PUBLIC_API_URL }}
+      CLOUDFLARE_ADMIN_API_URL: ${{ vars.CLOUDFLARE_ADMIN_API_URL }}
+      CLOUDFLARE_PUBLIC_APP_URL: ${{ vars.CLOUDFLARE_PUBLIC_APP_URL }}
+      CLOUDFLARE_ADMIN_APP_URL: ${{ vars.CLOUDFLARE_ADMIN_APP_URL }}
+      CLOUDFLARE_ALLOWED_ADMIN_EMAILS: ${{ vars.CLOUDFLARE_ALLOWED_ADMIN_EMAILS }}
+      CLOUDFLARE_ALLOWED_FROM_DOMAIN: ${{ vars.CLOUDFLARE_ALLOWED_FROM_DOMAIN }}
+      CLOUDFLARE_CORS_ALLOWED_ORIGINS: ${{ vars.CLOUDFLARE_CORS_ALLOWED_ORIGINS }}
+      CLOUDFLARE_EXTRA_CORS_ALLOWED_ORIGINS: ${{ vars.CLOUDFLARE_EXTRA_CORS_ALLOWED_ORIGINS }}
+      CLOUDFLARE_READ_ONLY_MODE: ${{ vars.CLOUDFLARE_READ_ONLY_MODE }}
+      CLOUDFLARE_SHARED_SCHEDULE_ID: ${{ vars.CLOUDFLARE_SHARED_SCHEDULE_ID }}
+      CLOUDFLARE_SESSION_COOKIE_DOMAIN: ${{ vars.CLOUDFLARE_SESSION_COOKIE_DOMAIN }}
+      CLOUDFLARE_SESSION_COOKIE_NAME: ${{ vars.CLOUDFLARE_SESSION_COOKIE_NAME }}
+      CLOUDFLARE_SESSION_COOKIE_SAME_SITE: ${{ vars.CLOUDFLARE_SESSION_COOKIE_SAME_SITE }}
+      CLOUDFLARE_SESSION_TTL_HOURS: ${{ vars.CLOUDFLARE_SESSION_TTL_HOURS }}
+      CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS }}
+      CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS }}
+      CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL }}
+      CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS }}
+      CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL }}
+      CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Render public worker config
+        run: npm run cf:render:worker:public
+
+      - name: Render admin worker config
+        run: npm run cf:render:worker:admin
+
+      - name: Deploy public worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config server/public-schedules-worker/wrangler.generated.${{ needs.prepare.outputs.deploy_env }}.public.toml
+
+      - name: Deploy admin worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config server/public-schedules-worker/wrangler.generated.${{ needs.prepare.outputs.deploy_env }}.admin.toml
+
+  deploy-pages:
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - deploy-workers
+    environment: ${{ needs.prepare.outputs.deploy_env }}
+    env:
+      DEPLOY_ENV: ${{ needs.prepare.outputs.deploy_env }}
+      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}
+      CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+      CLOUDFLARE_D1_DATABASE_NAME: ${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}
+      CLOUDFLARE_D1_PREVIEW_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_PREVIEW_DATABASE_ID }}
+      CLOUDFLARE_PUBLIC_WORKER_NAME: ${{ vars.CLOUDFLARE_PUBLIC_WORKER_NAME }}
+      CLOUDFLARE_ADMIN_WORKER_NAME: ${{ vars.CLOUDFLARE_ADMIN_WORKER_NAME }}
+      CLOUDFLARE_PUBLIC_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PUBLIC_PAGES_PROJECT }}
+      CLOUDFLARE_ADMIN_PAGES_PROJECT: ${{ vars.CLOUDFLARE_ADMIN_PAGES_PROJECT }}
+      CLOUDFLARE_PUBLIC_API_URL: ${{ vars.CLOUDFLARE_PUBLIC_API_URL }}
+      CLOUDFLARE_ADMIN_API_URL: ${{ vars.CLOUDFLARE_ADMIN_API_URL }}
+      CLOUDFLARE_PUBLIC_APP_URL: ${{ vars.CLOUDFLARE_PUBLIC_APP_URL }}
+      CLOUDFLARE_ADMIN_APP_URL: ${{ vars.CLOUDFLARE_ADMIN_APP_URL }}
+      CLOUDFLARE_ALLOWED_ADMIN_EMAILS: ${{ vars.CLOUDFLARE_ALLOWED_ADMIN_EMAILS }}
+      CLOUDFLARE_ALLOWED_FROM_DOMAIN: ${{ vars.CLOUDFLARE_ALLOWED_FROM_DOMAIN }}
+      CLOUDFLARE_CORS_ALLOWED_ORIGINS: ${{ vars.CLOUDFLARE_CORS_ALLOWED_ORIGINS }}
+      CLOUDFLARE_EXTRA_CORS_ALLOWED_ORIGINS: ${{ vars.CLOUDFLARE_EXTRA_CORS_ALLOWED_ORIGINS }}
+      CLOUDFLARE_READ_ONLY_MODE: ${{ vars.CLOUDFLARE_READ_ONLY_MODE }}
+      CLOUDFLARE_SHARED_SCHEDULE_ID: ${{ vars.CLOUDFLARE_SHARED_SCHEDULE_ID }}
+      CLOUDFLARE_SESSION_COOKIE_DOMAIN: ${{ vars.CLOUDFLARE_SESSION_COOKIE_DOMAIN }}
+      CLOUDFLARE_SESSION_COOKIE_NAME: ${{ vars.CLOUDFLARE_SESSION_COOKIE_NAME }}
+      CLOUDFLARE_SESSION_COOKIE_SAME_SITE: ${{ vars.CLOUDFLARE_SESSION_COOKIE_SAME_SITE }}
+      CLOUDFLARE_SESSION_TTL_HOURS: ${{ vars.CLOUDFLARE_SESSION_TTL_HOURS }}
+      CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS }}
+      CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS }}
+      CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL }}
+      CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS }}
+      CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL }}
+      CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build public pages app
+        run: npm run cf:build:public
 
       - name: Deploy public pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name hl-scheduler-public --branch main
+          command: pages deploy dist --project-name ${{ vars.CLOUDFLARE_PUBLIC_PAGES_PROJECT || (needs.prepare.outputs.deploy_env == 'production' && 'hl-scheduler-public' || 'hl-scheduler-public-staging') }} --branch ${{ needs.prepare.outputs.pages_branch }}
 
-      - name: Build admin web app
-        env:
-          VITE_APP_ROLE: admin
-          VITE_PUBLIC_SCHEDULES_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_PUBLIC_SCHEDULES_WRITE_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_AUTH_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_ADMIN_API_BASE: https://hl-scheduler-public-api.skarhkdgus7.workers.dev
-          VITE_PUBLIC_APP_URL: https://hl-scheduler-public.pages.dev
-          VITE_ADMIN_APP_URL: https://hl-scheduler-admin.pages.dev
-          VITE_SHARED_SCHEDULE_ID: ""
-        run: npm run build
+      - name: Build admin pages app
+        run: npm run cf:build:admin
 
       - name: Deploy admin pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name hl-scheduler-admin --branch main
+          command: pages deploy dist --project-name ${{ vars.CLOUDFLARE_ADMIN_PAGES_PROJECT || (needs.prepare.outputs.deploy_env == 'production' && 'hl-scheduler-admin' || 'hl-scheduler-admin-staging') }} --branch ${{ needs.prepare.outputs.pages_branch }}
+
+  smoke-test:
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - deploy-pages
+    environment: ${{ needs.prepare.outputs.deploy_env }}
+    env:
+      DEPLOY_ENV: ${{ needs.prepare.outputs.deploy_env }}
+      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}
+      CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+      CLOUDFLARE_D1_DATABASE_NAME: ${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}
+      CLOUDFLARE_D1_PREVIEW_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_PREVIEW_DATABASE_ID }}
+      CLOUDFLARE_PUBLIC_WORKER_NAME: ${{ vars.CLOUDFLARE_PUBLIC_WORKER_NAME }}
+      CLOUDFLARE_ADMIN_WORKER_NAME: ${{ vars.CLOUDFLARE_ADMIN_WORKER_NAME }}
+      CLOUDFLARE_PUBLIC_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PUBLIC_PAGES_PROJECT }}
+      CLOUDFLARE_ADMIN_PAGES_PROJECT: ${{ vars.CLOUDFLARE_ADMIN_PAGES_PROJECT }}
+      CLOUDFLARE_PUBLIC_API_URL: ${{ vars.CLOUDFLARE_PUBLIC_API_URL }}
+      CLOUDFLARE_ADMIN_API_URL: ${{ vars.CLOUDFLARE_ADMIN_API_URL }}
+      CLOUDFLARE_PUBLIC_APP_URL: ${{ vars.CLOUDFLARE_PUBLIC_APP_URL }}
+      CLOUDFLARE_ADMIN_APP_URL: ${{ vars.CLOUDFLARE_ADMIN_APP_URL }}
+      CLOUDFLARE_ALLOWED_ADMIN_EMAILS: ${{ vars.CLOUDFLARE_ALLOWED_ADMIN_EMAILS }}
+      CLOUDFLARE_ALLOWED_FROM_DOMAIN: ${{ vars.CLOUDFLARE_ALLOWED_FROM_DOMAIN }}
+      CLOUDFLARE_CORS_ALLOWED_ORIGINS: ${{ vars.CLOUDFLARE_CORS_ALLOWED_ORIGINS }}
+      CLOUDFLARE_EXTRA_CORS_ALLOWED_ORIGINS: ${{ vars.CLOUDFLARE_EXTRA_CORS_ALLOWED_ORIGINS }}
+      CLOUDFLARE_READ_ONLY_MODE: ${{ vars.CLOUDFLARE_READ_ONLY_MODE }}
+      CLOUDFLARE_SHARED_SCHEDULE_ID: ${{ vars.CLOUDFLARE_SHARED_SCHEDULE_ID }}
+      CLOUDFLARE_SESSION_COOKIE_DOMAIN: ${{ vars.CLOUDFLARE_SESSION_COOKIE_DOMAIN }}
+      CLOUDFLARE_SESSION_COOKIE_NAME: ${{ vars.CLOUDFLARE_SESSION_COOKIE_NAME }}
+      CLOUDFLARE_SESSION_COOKIE_SAME_SITE: ${{ vars.CLOUDFLARE_SESSION_COOKIE_SAME_SITE }}
+      CLOUDFLARE_SESSION_TTL_HOURS: ${{ vars.CLOUDFLARE_SESSION_TTL_HOURS }}
+      CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS }}
+      CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS }}
+      CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL }}
+      CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS }}
+      CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL }}
+      CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Wait for propagation
+        run: sleep 20
+
+      - name: Run deployment smoke tests
+        run: npm run cf:smoke

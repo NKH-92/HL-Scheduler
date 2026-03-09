@@ -1,3 +1,6 @@
+import { CollabWorkspaceRoom, getCollabSchemaStatements, handleCollabRequest } from './collab-api.mjs';
+import { resolveAllowedOrigin } from './cors-utils.mjs';
+
 const CORS_ALLOW_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS';
 const CORS_ALLOW_HEADERS =
   'Content-Type, X-Upload-Key, X-Folder-Admin-Key, Authorization, CF-Access-Authenticated-User-Email';
@@ -6,6 +9,10 @@ const CORS_MAX_AGE = '86400';
 const MAX_FOLDER_DEPTH = 4;
 const MAX_FOLDER_NAME_LENGTH = 40;
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
+const MAX_HOLDING_REASON_LENGTH = 280;
+const MAX_NEXT_ACTION_LENGTH = 280;
+const MAX_ACTIVITY_LOG_ENTRIES = 20;
+const STALE_PROJECT_DAYS = 7;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_LENGTH = 128;
@@ -22,6 +29,11 @@ const STATUS_PENDING = 'pending';
 const STATUS_APPROVED = 'approved';
 const STATUS_REJECTED = 'rejected';
 const STATUS_DISABLED = 'disabled';
+const SCHEDULE_STATUS_PLANNING = 'planning';
+const SCHEDULE_STATUS_IN_PROGRESS = 'in_progress';
+const SCHEDULE_STATUS_HOLDING = 'holding';
+const SCHEDULE_STATUS_CLOSED = 'closed';
+const SCHEDULE_STATUS_DEFAULT = SCHEDULE_STATUS_PLANNING;
 
 let runtimeSchemaReadyPromise = null;
 
@@ -33,12 +45,6 @@ const parseBoolean = (value, fallback = false) => {
   if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') return false;
   return fallback;
 };
-
-const parseCsv = (value) =>
-  String(value || '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
 
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
@@ -77,17 +83,17 @@ const parseJsonSafe = (text) => {
 const readJsonObjectBody = async (request, { maxBytes = MAX_JSON_BODY_BYTES } = {}) => {
   const contentType = String(request.headers.get('content-type') || '').toLowerCase();
   if (!contentType.includes('application/json')) {
-    return { ok: false, message: 'Content-Type must be application/json.' };
+    return { ok: false, message: 'Content-Type은 application/json 이어야 합니다.' };
   }
 
   const text = await request.text();
   if (new TextEncoder().encode(text).length > maxBytes) {
-    return { ok: false, message: 'Payload too large (max ~1MB).' };
+    return { ok: false, message: '요청 본문이 너무 큽니다. (최대 약 1MB)' };
   }
 
   const payload = parseJsonSafe(text);
-  if (payload == null) return { ok: false, message: 'Invalid JSON.' };
-  if (!isPlainObject(payload)) return { ok: false, message: 'Payload must be an object.' };
+  if (payload == null) return { ok: false, message: '잘못된 JSON입니다.' };
+  if (!isPlainObject(payload)) return { ok: false, message: '요청 본문은 객체여야 합니다.' };
 
   return { ok: true, payload };
 };
@@ -103,27 +109,34 @@ const normalizeFolderId = (value) => {
 
 const normalizeFolderName = (value) => String(value || '').trim();
 const getSharedScheduleId = (env) => String(env.SHARED_SCHEDULE_ID || '').trim();
+const normalizeScheduleStatus = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return SCHEDULE_STATUS_DEFAULT;
 
-const normalizeOrigin = (value) => String(value || '').trim().replace(/\/+$/, '').toLowerCase();
-
-const getAllowedOrigins = (env) => {
-  const raw = parseCsv(env.CORS_ALLOWED_ORIGINS);
-  return raw.map((item) => (item === '*' ? '*' : normalizeOrigin(item))).filter(Boolean);
-};
-
-const resolveAllowedOrigin = (requestOrigin, env) => {
-  const origin = String(requestOrigin || '').trim();
-  const allowedOrigins = getAllowedOrigins(env);
-  const allowAny = allowedOrigins.length === 0 || allowedOrigins.includes('*');
-
-  if (!origin) {
-    return allowAny ? '*' : null;
+  switch (raw) {
+    case SCHEDULE_STATUS_PLANNING:
+    case 'plan':
+      return SCHEDULE_STATUS_PLANNING;
+    case SCHEDULE_STATUS_IN_PROGRESS:
+    case 'in progress':
+    case 'in-progress':
+    case 'inprogress':
+    case 'progress':
+      return SCHEDULE_STATUS_IN_PROGRESS;
+    case SCHEDULE_STATUS_HOLDING:
+    case 'hold':
+    case 'on hold':
+    case 'on_hold':
+    case 'paused':
+      return SCHEDULE_STATUS_HOLDING;
+    case SCHEDULE_STATUS_CLOSED:
+    case 'done':
+    case 'complete':
+    case 'completed':
+      return SCHEDULE_STATUS_CLOSED;
+    default:
+      return SCHEDULE_STATUS_DEFAULT;
   }
-
-  if (allowAny) return origin;
-
-  const normalized = normalizeOrigin(origin);
-  return allowedOrigins.includes(normalized) ? origin : null;
 };
 
 const buildCorsContext = (request, env) => {
@@ -227,6 +240,344 @@ const randomHex = (size = 16) => {
   const bytes = new Uint8Array(Math.max(1, Number(size) || 16));
   crypto.getRandomValues(bytes);
   return bytesToHex(bytes);
+};
+
+const normalizeShortText = (value, { maxLength = 280 } = {}) => String(value || '').trim().slice(0, maxLength);
+
+const normalizeYmdLike = (value) => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    const directMatch = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(trimmed);
+    if (directMatch) {
+      const year = Number(directMatch[1]);
+      const month = Number(directMatch[2]);
+      const day = Number(directMatch[3]);
+      if (
+        Number.isFinite(year) &&
+        Number.isFinite(month) &&
+        Number.isFinite(day) &&
+        month >= 1 &&
+        month <= 12 &&
+        day >= 1 &&
+        day <= 31
+      ) {
+        return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      }
+    }
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
+const ymdToUtcMidnightMs = (value) => {
+  const safeYmd = normalizeYmdLike(value);
+  if (!safeYmd) return Number.NaN;
+  const [yearRaw, monthRaw, dayRaw] = safeYmd.split('-');
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return Number.NaN;
+  return Date.UTC(year, month - 1, day);
+};
+
+const diffDaysFromMs = (startMs, endMs) => {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return Number.NaN;
+  return Math.floor((endMs - startMs) / (1000 * 60 * 60 * 24));
+};
+
+const normalizeProgress = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return clamp(Math.round(n), 0, 100);
+};
+
+const normalizeTaskSummary = (rawTask) => {
+  const task = isPlainObject(rawTask) ? rawTask : {};
+  const startRaw = task.start ?? task.actStart ?? task.planStart ?? '';
+  const endRaw = task.end ?? task.actEnd ?? task.planEnd ?? task.start ?? task.actStart ?? task.planStart ?? '';
+  let start = normalizeYmdLike(startRaw);
+  let end = normalizeYmdLike(endRaw);
+  const startMs = ymdToUtcMidnightMs(start);
+  const endMs = ymdToUtcMidnightMs(end);
+  if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs < startMs) {
+    const nextStart = end;
+    end = start;
+    start = nextStart;
+  }
+  return {
+    category: normalizeShortText(task.category, { maxLength: 80 }),
+    taskName: normalizeShortText(task.taskName, { maxLength: 140 }),
+    department: normalizeShortText(task.department, { maxLength: 80 }),
+    assignee: normalizeShortText(task.assignee, { maxLength: 80 }),
+    assigneeEmail: normalizeEmail(task.assigneeEmail ?? task.assignee_email),
+    start,
+    end,
+    progress: normalizeProgress(task.progress),
+  };
+};
+
+const normalizeActivityEntry = (entry) => {
+  const source = isPlainObject(entry) ? entry : {};
+  const message = normalizeShortText(source.message, { maxLength: 220 });
+  if (!message) return null;
+  return {
+    id: normalizeShortText(source.id, { maxLength: 64 }) || randomHex(8),
+    type: normalizeShortText(source.type, { maxLength: 48 }) || 'update',
+    message,
+    actorEmail: normalizeEmail(source.actorEmail ?? source.actor_email),
+    at: toSafeTimestamp(source.at ?? source.createdAt ?? source.created_at) ?? nowMs(),
+  };
+};
+
+const normalizeActivityLog = (entries) =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => normalizeActivityEntry(entry))
+    .filter(Boolean)
+    .sort((a, b) => Number(b.at || 0) - Number(a.at || 0))
+    .slice(0, MAX_ACTIVITY_LOG_ENTRIES);
+
+const createActivityEntry = ({ type = 'update', message = '', actorEmail = '', at = nowMs() } = {}) =>
+  normalizeActivityEntry({
+    id: randomHex(8),
+    type,
+    message,
+    actorEmail,
+    at,
+  });
+
+const appendActivityEntries = (existingEntries, newEntries) =>
+  normalizeActivityLog([...(Array.isArray(newEntries) ? newEntries : []), ...normalizeActivityLog(existingEntries)]);
+
+const buildScheduleOverview = ({ data = null, updatedAt = null, status = SCHEDULE_STATUS_DEFAULT } = {}) => {
+  const safeData = isPlainObject(data) ? data : {};
+  const safeTasks = Array.isArray(safeData.tasks) ? safeData.tasks.map((task) => normalizeTaskSummary(task)) : [];
+  const normalizedStatus = normalizeScheduleStatus(status ?? safeData.status);
+  const todayMs = ymdToUtcMidnightMs(new Date());
+
+  const progressTotal = safeTasks.reduce((sum, task) => sum + normalizeProgress(task.progress), 0);
+  const completedTasks = safeTasks.filter((task) => task.progress >= 100).length;
+  const activeTasks = safeTasks.filter((task) => task.progress < 100).length;
+  const activeTaskDates = safeTasks.filter((task) => task.progress < 100);
+
+  const assigneeCounts = new Map();
+  const departmentCounts = new Map();
+  const assigneeSource = activeTaskDates.length > 0 ? activeTaskDates : safeTasks;
+  assigneeSource.forEach((task) => {
+    const assignee = String(task.assignee || '').trim();
+    const department = String(task.department || '').trim();
+    if (assignee) assigneeCounts.set(assignee, (assigneeCounts.get(assignee) || 0) + 1);
+    if (department) departmentCounts.set(department, (departmentCounts.get(department) || 0) + 1);
+  });
+
+  const orderedAssignees = Array.from(
+    new Set(safeTasks.map((task) => String(task.assignee || '').trim()).filter(Boolean)),
+  ).sort((a, b) => a.localeCompare(b, 'ko'));
+  const orderedDepartments = Array.from(
+    new Set(safeTasks.map((task) => String(task.department || '').trim()).filter(Boolean)),
+  ).sort((a, b) => a.localeCompare(b, 'ko'));
+
+  const choosePrimaryValue = (counts, fallbackValues) => {
+    const ordered = Array.from(counts.entries()).sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return a[0].localeCompare(b[0], 'ko');
+    });
+    if (ordered.length > 0) return ordered[0][0];
+    return Array.isArray(fallbackValues) ? fallbackValues[0] || '' : '';
+  };
+
+  const taskDatePairs = safeTasks
+    .map((task) => ({
+      startMs: ymdToUtcMidnightMs(task.start),
+      endMs: ymdToUtcMidnightMs(task.end),
+      progress: task.progress,
+    }))
+    .filter((task) => Number.isFinite(task.startMs) || Number.isFinite(task.endMs));
+
+  const startCandidates = taskDatePairs.map((task) => task.startMs).filter(Number.isFinite);
+  const endCandidatesAll = taskDatePairs
+    .map((task) => task.endMs)
+    .filter(Number.isFinite);
+  const endCandidatesActive = taskDatePairs
+    .filter((task) => task.progress < 100)
+    .map((task) => task.endMs)
+    .filter(Number.isFinite);
+
+  const projectStartMs = startCandidates.length > 0 ? Math.min(...startCandidates) : Number.NaN;
+  const projectEndMs = (endCandidatesActive.length > 0 ? Math.max(...endCandidatesActive) : Math.max(...endCandidatesAll)) || Number.NaN;
+
+  const delayedTasks = taskDatePairs.filter((task) => task.progress < 100 && Number.isFinite(task.endMs) && task.endMs < todayMs).length;
+  const dueTodayTasks = taskDatePairs.filter((task) => task.progress < 100 && task.endMs === todayMs).length;
+  const dueThisWeekTasks = taskDatePairs.filter((task) => {
+    if (task.progress >= 100 || !Number.isFinite(task.endMs)) return false;
+    const diff = diffDaysFromMs(todayMs, task.endMs);
+    return diff >= 0 && diff <= 7;
+  }).length;
+
+  const safeUpdatedAt = toSafeTimestamp(updatedAt);
+  const staleDays = safeUpdatedAt == null ? null : Math.max(0, diffDaysFromMs(safeUpdatedAt, nowMs()));
+  const isStale = normalizedStatus !== SCHEDULE_STATUS_CLOSED && staleDays != null && staleDays >= STALE_PROJECT_DAYS;
+  const isDelayed = delayedTasks > 0;
+  const isDueToday = dueTodayTasks > 0;
+  const isDueThisWeek = dueThisWeekTasks > 0;
+
+  const riskLabels = [];
+  if (isDelayed) riskLabels.push('지연');
+  if (isDueToday) riskLabels.push('오늘 마감');
+  if (!isDueToday && isDueThisWeek) riskLabels.push('이번 주 마감');
+  if (isStale) riskLabels.push('오래 미갱신');
+  if (normalizedStatus === SCHEDULE_STATUS_HOLDING) riskLabels.push('보류');
+
+  let riskLevel = 'none';
+  if (isDelayed || isDueToday) riskLevel = 'high';
+  else if (isDueThisWeek || isStale || normalizedStatus === SCHEDULE_STATUS_HOLDING) riskLevel = 'medium';
+  else if (activeTasks > 0) riskLevel = 'low';
+
+  const activityLog = normalizeActivityLog(safeData.activityLog);
+
+  return {
+    progress: safeTasks.length > 0 ? Math.round(progressTotal / safeTasks.length) : 0,
+    startDate: Number.isFinite(projectStartMs) ? normalizeYmdLike(projectStartMs) : '',
+    endDate: Number.isFinite(projectEndMs) ? normalizeYmdLike(projectEndMs) : '',
+    primaryAssignee: choosePrimaryValue(assigneeCounts, orderedAssignees),
+    primaryDepartment: choosePrimaryValue(departmentCounts, orderedDepartments),
+    assignees: orderedAssignees,
+    departments: orderedDepartments,
+    activeTasks,
+    completedTasks,
+    delayedTasks,
+    dueTodayTasks,
+    dueThisWeekTasks,
+    staleDays,
+    isDelayed,
+    isDueToday,
+    isDueThisWeek,
+    isStale,
+    riskLevel,
+    riskLabels,
+    lastActivityAt: activityLog[0]?.at ?? safeUpdatedAt,
+  };
+};
+
+const scheduleStatusLabel = (value) => {
+  switch (normalizeScheduleStatus(value)) {
+    case SCHEDULE_STATUS_IN_PROGRESS:
+      return 'In progress';
+    case SCHEDULE_STATUS_HOLDING:
+      return 'Holding';
+    case SCHEDULE_STATUS_CLOSED:
+      return 'Closed';
+    case SCHEDULE_STATUS_PLANNING:
+    default:
+      return 'Planning';
+  }
+};
+
+const buildScheduleActivityEntries = ({
+  mode = 'update',
+  payload = null,
+  existingData = null,
+  nextData = null,
+  actorEmail = '',
+  at = nowMs(),
+} = {}) => {
+  const safePayload = isPlainObject(payload) ? payload : {};
+  const previous = isPlainObject(existingData) ? existingData : {};
+  const next = isPlainObject(nextData) ? nextData : {};
+  const entries = [];
+
+  if (mode === 'create') {
+    entries.push(
+      createActivityEntry({
+        type: 'create',
+        actorEmail,
+        at,
+        message: '프로젝트가 공개 보드에 등록되었습니다.',
+      }),
+    );
+    return entries;
+  }
+
+  const previousStatus = normalizeScheduleStatus(previous.status);
+  const nextStatus = normalizeScheduleStatus(next.status);
+  if (previousStatus !== nextStatus) {
+    entries.push(
+      createActivityEntry({
+        type: 'status',
+        actorEmail,
+        at,
+        message: `상태 변경: ${scheduleStatusLabel(previousStatus)} -> ${scheduleStatusLabel(nextStatus)}`,
+      }),
+    );
+  }
+
+  const previousHoldingReason = normalizeShortText(previous.holdingReason, { maxLength: MAX_HOLDING_REASON_LENGTH });
+  const nextHoldingReason = normalizeShortText(next.holdingReason, { maxLength: MAX_HOLDING_REASON_LENGTH });
+  if (previousHoldingReason !== nextHoldingReason) {
+    entries.push(
+      createActivityEntry({
+        type: 'holding_reason',
+        actorEmail,
+        at,
+        message: nextHoldingReason ? 'Holding 사유가 업데이트되었습니다.' : 'Holding 사유가 제거되었습니다.',
+      }),
+    );
+  }
+
+  const previousNextAction = normalizeShortText(previous.nextAction, { maxLength: MAX_NEXT_ACTION_LENGTH });
+  const nextNextAction = normalizeShortText(next.nextAction, { maxLength: MAX_NEXT_ACTION_LENGTH });
+  if (previousNextAction !== nextNextAction) {
+    entries.push(
+      createActivityEntry({
+        type: 'next_action',
+        actorEmail,
+        at,
+        message: nextNextAction ? '다음 액션이 업데이트되었습니다.' : '다음 액션이 제거되었습니다.',
+      }),
+    );
+  }
+
+  if (String(previous.name || '').trim() !== String(next.name || '').trim()) {
+    entries.push(
+      createActivityEntry({
+        type: 'rename',
+        actorEmail,
+        at,
+        message: '프로젝트 제목이 변경되었습니다.',
+      }),
+    );
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(safePayload, 'tasks') ||
+    Object.prototype.hasOwnProperty.call(safePayload, 'vacations') ||
+    Object.prototype.hasOwnProperty.call(safePayload, 'rangePadding') ||
+    Object.prototype.hasOwnProperty.call(safePayload, 'fitSettings') ||
+    Object.prototype.hasOwnProperty.call(safePayload, 'zoomSettings')
+  ) {
+    entries.push(
+      createActivityEntry({
+        type: 'schedule',
+        actorEmail,
+        at,
+        message: '일정 내용이 업데이트되었습니다.',
+      }),
+    );
+  }
+
+  if (entries.length === 0) {
+    entries.push(
+      createActivityEntry({
+        type: 'update',
+        actorEmail,
+        at,
+        message: '프로젝트 정보가 업데이트되었습니다.',
+      }),
+    );
+  }
+
+  return entries;
 };
 
 const sha256Hex = async (value) => {
@@ -461,7 +812,7 @@ const getSessionUser = async (request, env) => {
 
 const ensureAuthenticatedUser = async (request, env) => {
   const user = await getSessionUser(request, env);
-  if (!user) return { error: errorResponse('Authentication required.', { status: 401 }) };
+  if (!user) return { error: errorResponse('인증이 필요합니다.', { status: 401 }) };
   if (user.status !== STATUS_APPROVED) {
     return { error: errorResponse('Your account is not approved.', { status: 403 }) };
   }
@@ -473,13 +824,13 @@ const ensureAdminUser = async (request, env) => {
   if (auth.error) return auth;
   const user = auth.user;
   if (!user.isAdmin) {
-    return { error: errorResponse('Admin privileges are required.', { status: 403 }) };
+    return { error: errorResponse('관리자 권한이 필요합니다.', { status: 403 }) };
   }
 
   if (parseBoolean(env.REQUIRE_ACCESS_EMAIL, false)) {
     const accessEmail = normalizeEmail(request.headers.get('CF-Access-Authenticated-User-Email'));
     if (!accessEmail || !isValidEmail(accessEmail)) {
-      return { error: errorResponse('Cloudflare Access authentication is required.', { status: 401 }) };
+      return { error: errorResponse('Cloudflare Access 인증이 필요합니다.', { status: 401 }) };
     }
     if (accessEmail !== user.email) {
       return { error: errorResponse('Access identity does not match the authenticated user.', { status: 403 }) };
@@ -521,6 +872,7 @@ const ensureRuntimeSchema = async (env) => {
           'id TEXT PRIMARY KEY,',
           'name TEXT NOT NULL,',
           'data TEXT NOT NULL,',
+          `status TEXT NOT NULL DEFAULT '${SCHEDULE_STATUS_DEFAULT}',`,
           'tasks_count INTEGER NOT NULL DEFAULT 0,',
           'vacations_count INTEGER NOT NULL DEFAULT 0,',
           'folder_id TEXT,',
@@ -533,11 +885,12 @@ const ensureRuntimeSchema = async (env) => {
       )
       .run();
 
-    const alterStatements = [
-      'ALTER TABLE schedules ADD COLUMN folder_id TEXT',
-      'ALTER TABLE schedules ADD COLUMN created_by_email TEXT',
-      'ALTER TABLE schedules ADD COLUMN updated_by_email TEXT',
-    ];
+	    const alterStatements = [
+	      `ALTER TABLE schedules ADD COLUMN status TEXT NOT NULL DEFAULT '${SCHEDULE_STATUS_DEFAULT}'`,
+	      'ALTER TABLE schedules ADD COLUMN folder_id TEXT',
+	      'ALTER TABLE schedules ADD COLUMN created_by_email TEXT',
+	      'ALTER TABLE schedules ADD COLUMN updated_by_email TEXT',
+	    ];
 
     for (const sql of alterStatements) {
       try {
@@ -565,10 +918,11 @@ const ensureRuntimeSchema = async (env) => {
         ].join(' '),
       )
       .run();
-    await env.DB.prepare('CREATE INDEX IF NOT EXISTS folders_parent_id ON folders(parent_id)').run();
-    await env.DB.prepare('CREATE INDEX IF NOT EXISTS folders_sort_order ON folders(sort_order)').run();
-    await env.DB.prepare('CREATE INDEX IF NOT EXISTS schedules_folder_id ON schedules(folder_id)').run();
-    await env.DB.prepare('CREATE INDEX IF NOT EXISTS schedules_updated_by_email_idx ON schedules(updated_by_email)').run();
+	    await env.DB.prepare('CREATE INDEX IF NOT EXISTS folders_parent_id ON folders(parent_id)').run();
+	    await env.DB.prepare('CREATE INDEX IF NOT EXISTS folders_sort_order ON folders(sort_order)').run();
+	    await env.DB.prepare('CREATE INDEX IF NOT EXISTS schedules_folder_id ON schedules(folder_id)').run();
+	    await env.DB.prepare('CREATE INDEX IF NOT EXISTS schedules_status_idx ON schedules(status)').run();
+	    await env.DB.prepare('CREATE INDEX IF NOT EXISTS schedules_updated_by_email_idx ON schedules(updated_by_email)').run();
 
     await env.DB
       .prepare(
@@ -621,6 +975,10 @@ const ensureRuntimeSchema = async (env) => {
       )
       .run();
     await env.DB.prepare('CREATE INDEX IF NOT EXISTS auth_rate_limits_updated_idx ON auth_rate_limits(updated_at)').run();
+
+    for (const sql of getCollabSchemaStatements()) {
+      await env.DB.prepare(sql).run();
+    }
   })().catch((error) => {
     runtimeSchemaReadyPromise = null;
     throw error;
@@ -702,13 +1060,19 @@ const clearAuthRateLimit = async (request, env, { scope, email = '' } = {}) => {
   await env.DB.prepare('DELETE FROM auth_rate_limits WHERE key = ?').bind(key).run();
 };
 
+const compareFoldersForOrder = (a, b) => {
+  const sortGap = (Number(a?.sortOrder) || 0) - (Number(b?.sortOrder) || 0);
+  if (sortGap !== 0) return sortGap;
+  return String(a?.name || '').localeCompare(String(b?.name || ''), 'ko', { sensitivity: 'base' });
+};
+
 const listFoldersFlat = async (db) => {
   const result = await db
     .prepare(
       [
         'SELECT id, name, parent_id, depth, sort_order, created_at, updated_at',
         'FROM folders',
-        'ORDER BY depth ASC, sort_order ASC, name COLLATE NOCASE ASC',
+        'ORDER BY sort_order ASC, name COLLATE NOCASE ASC',
       ].join(' '),
     )
     .all();
@@ -727,16 +1091,21 @@ const listFoldersFlat = async (db) => {
 };
 
 const buildFolderContext = async (db) => {
-  const folders = await listFoldersFlat(db);
+  const flatFolders = await listFoldersFlat(db);
   const byId = new Map();
   const childrenByParent = new Map();
 
-  folders.forEach((folder) => {
+  flatFolders.forEach((folder) => {
     if (!folder.id) return;
     byId.set(folder.id, folder);
     const key = folder.parentId || '';
     if (!childrenByParent.has(key)) childrenByParent.set(key, []);
     childrenByParent.get(key).push(folder.id);
+  });
+
+  childrenByParent.forEach((childIds, key) => {
+    childIds.sort((leftId, rightId) => compareFoldersForOrder(byId.get(leftId), byId.get(rightId)));
+    childrenByParent.set(key, childIds);
   });
 
   const pathCache = new Map();
@@ -757,11 +1126,74 @@ const buildFolderContext = async (db) => {
   };
 
   const pathById = new Map();
-  folders.forEach((folder) => {
+  flatFolders.forEach((folder) => {
     pathById.set(folder.id, resolvePath(folder.id));
   });
 
+  const folders = [];
+  const visitedFolderIds = new Set();
+  const appendChildren = (parentId = '') => {
+    const childIds = childrenByParent.get(parentId) || [];
+    childIds.forEach((childId) => {
+      if (!childId || visitedFolderIds.has(childId)) return;
+      visitedFolderIds.add(childId);
+      const folder = byId.get(childId);
+      if (!folder) return;
+      folders.push(folder);
+      appendChildren(childId);
+    });
+  };
+  appendChildren('');
+  flatFolders.forEach((folder) => {
+    if (!folder?.id || visitedFolderIds.has(folder.id)) return;
+    visitedFolderIds.add(folder.id);
+    folders.push(folder);
+    appendChildren(folder.id);
+  });
+
   return { folders, byId, childrenByParent, pathById };
+};
+
+const listSiblingFolders = async (db, parentId) => {
+  const result = await db
+    .prepare(
+      [
+        'SELECT id, name, parent_id, depth, sort_order, created_at, updated_at',
+        'FROM folders',
+        'WHERE parent_id IS ?',
+        'ORDER BY sort_order ASC, name COLLATE NOCASE ASC',
+      ].join(' '),
+    )
+    .bind(parentId)
+    .all();
+
+  return parseD1Rows(result)
+    .map((row) => {
+      const id = String(row?.id || '').trim();
+      if (!id) return null;
+      return {
+        id,
+        name: String(row?.name || '').trim() || id,
+        parentId: normalizeFolderId(row?.parent_id ?? row?.parentId),
+        depth: Math.max(1, Number(row?.depth) || 1),
+        sortOrder: Number(row?.sort_order ?? row?.sortOrder) || 0,
+        createdAt: toSafeTimestamp(row?.created_at ?? row?.createdAt),
+        updatedAt: toSafeTimestamp(row?.updated_at ?? row?.updatedAt),
+      };
+    })
+    .filter(Boolean)
+    .sort(compareFoldersForOrder);
+};
+
+const resequenceSiblingFolders = async (db, siblings, timestamp) => {
+  for (let index = 0; index < siblings.length; index += 1) {
+    const folder = siblings[index];
+    const nextSortOrder = index + 1;
+    await db
+      .prepare('UPDATE folders SET sort_order = ?, updated_at = ? WHERE id = ?')
+      .bind(nextSortOrder, timestamp, folder.id)
+      .run();
+  }
 };
 
 const collectDescendantFolderIds = (folderId, childrenByParent) => {
@@ -788,9 +1220,25 @@ const collectDescendantFolderIds = (folderId, childrenByParent) => {
 
 const scheduleRowToSummary = (row, pathById) => {
   const folderId = normalizeFolderId(row?.folder_id ?? row?.folderId);
+  const status = normalizeScheduleStatus(row?.status);
+  const parsedData = parseJsonSafe(String(row?.data || ''));
+  const safeData = isPlainObject(parsedData) ? parsedData : {};
+  const holdingReason = normalizeShortText(safeData.holdingReason, { maxLength: MAX_HOLDING_REASON_LENGTH });
+  const nextAction = normalizeShortText(safeData.nextAction, { maxLength: MAX_NEXT_ACTION_LENGTH });
+  const recentActivity = normalizeActivityLog(safeData.activityLog).slice(0, 3);
+  const overview = buildScheduleOverview({
+    data: safeData,
+    updatedAt: row?.updated_at ?? row?.updatedAt,
+    status,
+  });
   return {
     id: String(row?.id || '').trim(),
     name: String(row?.name || '').trim(),
+    status,
+    holdingReason,
+    nextAction,
+    recentActivity,
+    overview,
     tasksCount: Number(row?.tasks_count ?? row?.tasksCount ?? 0) || 0,
     vacationsCount: Number(row?.vacations_count ?? row?.vacationsCount ?? 0) || 0,
     folderId,
@@ -805,13 +1253,37 @@ const scheduleRowToSummary = (row, pathById) => {
 const scheduleRowToDetail = (row, pathById, request) => {
   const folderId = normalizeFolderId(row?.folder_id ?? row?.folderId);
   const parsedData = parseJsonSafe(String(row?.data || ''));
-  const data = parsedData ?? row?.data ?? null;
+  const rawData = parsedData ?? row?.data ?? null;
+  const status = normalizeScheduleStatus(row?.status ?? rawData?.status);
+  const holdingReason = normalizeShortText(rawData?.holdingReason, { maxLength: MAX_HOLDING_REASON_LENGTH });
+  const nextAction = normalizeShortText(rawData?.nextAction, { maxLength: MAX_NEXT_ACTION_LENGTH });
+  const activityLog = normalizeActivityLog(rawData?.activityLog);
+  const overview = buildScheduleOverview({
+    data: rawData,
+    updatedAt: row?.updated_at ?? row?.updatedAt,
+    status,
+  });
+  const data = isPlainObject(rawData)
+    ? {
+        ...rawData,
+        status,
+        holdingReason,
+        nextAction,
+        activityLog,
+      }
+    : rawData;
   const id = String(row?.id || '').trim();
 
   return {
     id,
     name: String(row?.name || '').trim(),
     data,
+    status,
+    holdingReason,
+    nextAction,
+    activityLog,
+    recentActivity: activityLog.slice(0, 5),
+    overview,
     tasksCount: Number(row?.tasks_count ?? row?.tasksCount ?? 0) || 0,
     vacationsCount: Number(row?.vacations_count ?? row?.vacationsCount ?? 0) || 0,
     folderId,
@@ -826,7 +1298,7 @@ const scheduleRowToDetail = (row, pathById, request) => {
 
 const parseScheduleWritePayload = (payload, existingData = null) => {
   const safeName = String(payload.name || existingData?.name || '').trim();
-  if (!safeName) return { ok: false, message: 'name is required.' };
+  if (!safeName) return { ok: false, message: 'name 값이 필요합니다.' };
 
   const tasks = Array.isArray(payload.tasks) ? payload.tasks : Array.isArray(existingData?.tasks) ? existingData.tasks : [];
   const vacations = Array.isArray(payload.vacations)
@@ -844,15 +1316,30 @@ const parseScheduleWritePayload = (payload, existingData = null) => {
   };
 
   const folderId = normalizeFolderId(payload.folderId ?? existingData?.folderId ?? null);
+  const status = normalizeScheduleStatus(payload.status ?? existingData?.status);
+  const holdingReason = normalizeShortText(payload.holdingReason ?? existingData?.holdingReason ?? '', {
+    maxLength: MAX_HOLDING_REASON_LENGTH,
+  });
+  const nextAction = normalizeShortText(payload.nextAction ?? existingData?.nextAction ?? '', {
+    maxLength: MAX_NEXT_ACTION_LENGTH,
+  });
+  const activityLog = normalizeActivityLog(existingData?.activityLog);
   return {
     ok: true,
     name: safeName,
+    status,
+    holdingReason,
+    nextAction,
     tasks,
     vacations,
     folderId,
     data: {
       ...nextData,
       folderId,
+      status,
+      holdingReason,
+      nextAction,
+      activityLog,
     },
   };
 };
@@ -874,7 +1361,7 @@ const createAuthSession = async (env, userId) => {
     .bind(sessionId, String(userId || '').trim(), tokenHash, expiresAt, now)
     .run();
 
-  if (!runResult?.success) throw new Error('Failed to create auth session.');
+  if (!runResult?.success) throw new Error('인증 세션 생성에 실패했습니다.');
   return { token, expiresAt };
 };
 
@@ -886,28 +1373,28 @@ const handleRegisterAuth = async (request, env) => {
 
   const rateLimit = await consumeAuthRateLimit(request, env, { scope: 'register', email });
   if (rateLimit.limited) {
-    return errorResponse('Too many register attempts. Please try again later.', {
+    return errorResponse('회원가입 시도가 너무 많습니다. 잠시 후 다시 시도하세요.', {
       status: 429,
       details: { retryAfterSeconds: rateLimit.retryAfterSeconds },
     });
   }
 
   if (!email || !isValidEmail(email)) {
-    return errorResponse('email is required and must be a valid email.', { status: 400 });
+    return errorResponse('email은 올바른 이메일 형식으로 입력해야 합니다.', { status: 400 });
   }
   if (!isAllowedEmailDomain(email, env)) {
-    return errorResponse(`Only @${String(env.ALLOWED_FROM_DOMAIN || '').trim()} accounts are allowed.`, { status: 400 });
+    return errorResponse(`@${String(env.ALLOWED_FROM_DOMAIN || '').trim()} 계정만 사용할 수 있습니다.`, { status: 400 });
   }
   if (password.length < MIN_PASSWORD_LENGTH || password.length > MAX_PASSWORD_LENGTH) {
     return errorResponse(
-      `password length must be between ${MIN_PASSWORD_LENGTH} and ${MAX_PASSWORD_LENGTH} characters.`,
+      `비밀번호 길이는 ${MIN_PASSWORD_LENGTH}자 이상 ${MAX_PASSWORD_LENGTH}자 이하여야 합니다.`,
       { status: 400 },
     );
   }
 
   const existing = await getUserByEmail(env, email);
   if (existing) {
-    return errorResponse('This email is already registered.', { status: 409 });
+    return errorResponse('이미 등록된 이메일입니다.', { status: 409 });
   }
 
   const isAdmin = normalizeEmailList(env.ALLOWED_ADMIN_EMAILS).includes(email);
@@ -929,7 +1416,7 @@ const handleRegisterAuth = async (request, env) => {
     .run();
 
   if (!runResult?.success) {
-    return errorResponse('Failed to register account.', { status: 500 });
+    return errorResponse('계정 등록에 실패했습니다.', { status: 500 });
   }
 
   return jsonResponse({
@@ -956,42 +1443,42 @@ const handleLoginAuth = async (request, env) => {
 
   const rateLimit = await consumeAuthRateLimit(request, env, { scope: 'login', email });
   if (rateLimit.limited) {
-    return errorResponse('Too many login attempts. Please try again later.', {
+    return errorResponse('로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.', {
       status: 429,
       details: { retryAfterSeconds: rateLimit.retryAfterSeconds },
     });
   }
 
   if (!email || !isValidEmail(email)) {
-    return errorResponse('email is required and must be a valid email.', { status: 400 });
+    return errorResponse('email은 올바른 이메일 형식으로 입력해야 합니다.', { status: 400 });
   }
   if (!password) {
-    return errorResponse('password is required.', { status: 400 });
+    return errorResponse('비밀번호를 입력하세요.', { status: 400 });
   }
 
   const rawUser = await env.DB.prepare('SELECT * FROM users WHERE email = ? LIMIT 1').bind(email).first();
-  if (!rawUser) return errorResponse('Invalid email or password.', { status: 401 });
+  if (!rawUser) return errorResponse('이메일 또는 비밀번호가 올바르지 않습니다.', { status: 401 });
 
   const verifyResult = await verifyPassword(password, rawUser.password_hash, env);
   if (!verifyResult.ok) {
     if (verifyResult.reason === 'iterations_not_supported') {
-      return errorResponse('This account password must be reset by admin before login.', {
+      return errorResponse('이 계정의 비밀번호는 관리자 초기화 후 다시 로그인해야 합니다.', {
         status: 403,
         details: { code: 'password_reset_required' },
       });
     }
     if (verifyResult.reason === 'derive_failed') {
-      return errorResponse('Password verification failed. Please contact admin for password reset.', {
+      return errorResponse('비밀번호 확인에 실패했습니다. 관리자에게 비밀번호 초기화를 요청하세요.', {
         status: 403,
         details: { code: 'password_verify_failed' },
       });
     }
-    return errorResponse('Invalid email or password.', { status: 401 });
+    return errorResponse('이메일 또는 비밀번호가 올바르지 않습니다.', { status: 401 });
   }
 
   const user = mapUserRow(rawUser, env);
   if (user.status !== STATUS_APPROVED) {
-    return errorResponse('Your account is pending approval.', { status: 403, details: { status: user.status } });
+    return errorResponse('계정 승인 대기 중입니다.', { status: 403, details: { status: user.status } });
   }
 
   const session = await createAuthSession(env, user.id);
@@ -1142,13 +1629,13 @@ const handleListSchedules = async (request, env) => {
   const folderContext = await buildFolderContext(DB);
 
   if (sharedScheduleId) {
-    const row = await DB
-      .prepare(
-        [
-          'SELECT id, name, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at',
-          'FROM schedules',
-          'WHERE id = ?',
-          'LIMIT 1',
+	    const row = await DB
+	      .prepare(
+	        [
+	          'SELECT id, name, data, status, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at',
+	          'FROM schedules',
+	          'WHERE id = ?',
+	          'LIMIT 1',
         ].join(' '),
       )
       .bind(sharedScheduleId)
@@ -1190,10 +1677,10 @@ const handleListSchedules = async (request, env) => {
     }
   }
 
-  const sqlParts = [
-    'SELECT id, name, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at',
-    'FROM schedules',
-  ];
+	  const sqlParts = [
+	    'SELECT id, name, data, status, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at',
+	    'FROM schedules',
+	  ];
   if (whereParts.length > 0) {
     sqlParts.push(`WHERE ${whereParts.join(' AND ')}`);
   }
@@ -1213,13 +1700,13 @@ const handleGetSchedule = async (request, env, id) => {
     return errorResponse('Schedule not found.', { status: 404 });
   }
 
-  const row = await env.DB
-    .prepare(
-      [
-        'SELECT id, name, data, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at',
-        'FROM schedules',
-        'WHERE id = ?',
-        'LIMIT 1',
+	  const row = await env.DB
+	    .prepare(
+	      [
+	        'SELECT id, name, data, status, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at',
+	        'FROM schedules',
+	        'WHERE id = ?',
+	        'LIMIT 1',
       ].join(' '),
     )
     .bind(id)
@@ -1259,27 +1746,37 @@ const handleCreateSchedule = async (request, env) => {
   const createdByEmail = actor.email;
   const updatedByEmail = actor.email;
 
-  const id = crypto.randomUUID();
-  const timestamp = nowMs();
-  parsed.data.createdByEmail = createdByEmail;
-  parsed.data.updatedByEmail = updatedByEmail;
-  parsed.data.createdAt = timestamp;
-  parsed.data.updatedAt = timestamp;
+	  const id = crypto.randomUUID();
+	  const timestamp = nowMs();
+	  parsed.data.createdByEmail = createdByEmail;
+	  parsed.data.updatedByEmail = updatedByEmail;
+	  parsed.data.createdAt = timestamp;
+	  parsed.data.updatedAt = timestamp;
+	  parsed.data.activityLog = appendActivityEntries(
+	    parsed.data.activityLog,
+	    buildScheduleActivityEntries({
+	      mode: 'create',
+	      nextData: parsed.data,
+	      actorEmail: actor.email,
+	      at: timestamp,
+	    }),
+	  );
 
-  const runResult = await env.DB
-    .prepare(
-      [
-        'INSERT INTO schedules (id, name, data, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at)',
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      ].join(' '),
-    )
-    .bind(
-      id,
-      parsed.name,
-      JSON.stringify(parsed.data),
-      parsed.tasks.length,
-      parsed.vacations.length,
-      parsed.folderId,
+		  const runResult = await env.DB
+	    .prepare(
+	      [
+	        'INSERT INTO schedules (id, name, data, status, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at)',
+	        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+	      ].join(' '),
+	    )
+	    .bind(
+	      id,
+	      parsed.name,
+	      JSON.stringify(parsed.data),
+	      parsed.status,
+	      parsed.tasks.length,
+	      parsed.vacations.length,
+	      parsed.folderId,
       createdByEmail,
       updatedByEmail,
       timestamp,
@@ -1291,19 +1788,26 @@ const handleCreateSchedule = async (request, env) => {
     return errorResponse('Failed to create schedule.', { status: 500 });
   }
 
-  const folderContext = await buildFolderContext(env.DB);
-  return jsonResponse(
-    {
-      id,
-      name: parsed.name,
-      url: buildScheduleUrl(request, id),
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      tasksCount: parsed.tasks.length,
-      vacationsCount: parsed.vacations.length,
-      folderId: parsed.folderId,
-      folderPath: parsed.folderId ? String(folderContext.pathById.get(parsed.folderId) || '') : '',
-      createdByEmail,
+	  const folderContext = await buildFolderContext(env.DB);
+	  const overview = buildScheduleOverview({ data: parsed.data, updatedAt: timestamp, status: parsed.status });
+	  const recentActivity = normalizeActivityLog(parsed.data.activityLog).slice(0, 3);
+	  return jsonResponse(
+	    {
+	      id,
+	      name: parsed.name,
+	      url: buildScheduleUrl(request, id),
+	      createdAt: timestamp,
+	      updatedAt: timestamp,
+		      tasksCount: parsed.tasks.length,
+		      vacationsCount: parsed.vacations.length,
+		      status: parsed.status,
+		      holdingReason: parsed.holdingReason,
+		      nextAction: parsed.nextAction,
+		      recentActivity,
+		      overview,
+		      folderId: parsed.folderId,
+		      folderPath: parsed.folderId ? String(folderContext.pathById.get(parsed.folderId) || '') : '',
+		      createdByEmail,
       updatedByEmail,
     },
     { status: 201 },
@@ -1327,13 +1831,13 @@ const handleUpdateSchedule = async (request, env, id) => {
   if (!bodyResult.ok) return errorResponse(bodyResult.message, { status: 400 });
   const payload = bodyResult.payload;
 
-  const existingRow = await env.DB
-    .prepare(
-      [
-        'SELECT id, name, data, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at',
-        'FROM schedules',
-        'WHERE id = ?',
-        'LIMIT 1',
+	  const existingRow = await env.DB
+	    .prepare(
+	      [
+	        'SELECT id, name, data, status, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at',
+	        'FROM schedules',
+	        'WHERE id = ?',
+	        'LIMIT 1',
       ].join(' '),
     )
     .bind(id)
@@ -1341,8 +1845,14 @@ const handleUpdateSchedule = async (request, env, id) => {
 
   if (!existingRow) return errorResponse('Schedule not found.', { status: 404 });
 
-  const existingData = parseJsonSafe(String(existingRow?.data || ''));
-  const parsed = parseScheduleWritePayload(payload, isPlainObject(existingData) ? existingData : null);
+	  const existingData = parseJsonSafe(String(existingRow?.data || ''));
+	  const existingScheduleData = isPlainObject(existingData)
+	    ? {
+	        ...existingData,
+	        status: normalizeScheduleStatus(existingRow?.status ?? existingData?.status),
+	      }
+	    : null;
+	  const parsed = parseScheduleWritePayload(payload, existingScheduleData);
   if (!parsed.ok) return errorResponse(parsed.message, { status: 400 });
 
   if (parsed.folderId != null) {
@@ -1358,26 +1868,38 @@ const handleUpdateSchedule = async (request, env, id) => {
     return errorResponse('Schedule was modified by another user. Reload and retry.', { status: 409 });
   }
 
-  const timestamp = nowMs();
-  const createdByEmail = normalizeEmail(existingRow.created_by_email ?? existingRow.createdByEmail) || actor.email;
-  parsed.data.createdByEmail = createdByEmail;
-  parsed.data.updatedByEmail = updatedByEmail;
-  parsed.data.updatedAt = timestamp;
+	  const timestamp = nowMs();
+	  const createdByEmail = normalizeEmail(existingRow.created_by_email ?? existingRow.createdByEmail) || actor.email;
+	  parsed.data.createdByEmail = createdByEmail;
+	  parsed.data.updatedByEmail = updatedByEmail;
+	  parsed.data.updatedAt = timestamp;
+	  parsed.data.activityLog = appendActivityEntries(
+	    existingScheduleData?.activityLog,
+	    buildScheduleActivityEntries({
+	      mode: 'update',
+	      payload,
+	      existingData: existingScheduleData,
+	      nextData: parsed.data,
+	      actorEmail: actor.email,
+	      at: timestamp,
+	    }),
+	  );
 
-  const runResult = await env.DB
-    .prepare(
-      [
-        'UPDATE schedules',
-        'SET name = ?, data = ?, tasks_count = ?, vacations_count = ?, folder_id = ?, created_by_email = ?, updated_by_email = ?, updated_at = ?',
-        'WHERE id = ?',
-      ].join(' '),
-    )
-    .bind(
-      parsed.name,
-      JSON.stringify(parsed.data),
-      parsed.tasks.length,
-      parsed.vacations.length,
-      parsed.folderId,
+		  const runResult = await env.DB
+	    .prepare(
+	      [
+	        'UPDATE schedules',
+	        'SET name = ?, data = ?, status = ?, tasks_count = ?, vacations_count = ?, folder_id = ?, created_by_email = ?, updated_by_email = ?, updated_at = ?',
+	        'WHERE id = ?',
+	      ].join(' '),
+	    )
+	    .bind(
+	      parsed.name,
+	      JSON.stringify(parsed.data),
+	      parsed.status,
+	      parsed.tasks.length,
+	      parsed.vacations.length,
+	      parsed.folderId,
       createdByEmail,
       updatedByEmail,
       timestamp,
@@ -1385,22 +1907,59 @@ const handleUpdateSchedule = async (request, env, id) => {
     )
     .run();
 
-  if (!runResult?.success) {
-    return errorResponse('Failed to update schedule.', { status: 500 });
-  }
+	  if (!runResult?.success) {
+	    return errorResponse('Failed to update schedule.', { status: 500 });
+	  }
 
-  const folderContext = await buildFolderContext(env.DB);
-  return jsonResponse({
-    id,
-    name: parsed.name,
-    url: buildScheduleUrl(request, id),
-    updatedAt: timestamp,
-    tasksCount: parsed.tasks.length,
-    vacationsCount: parsed.vacations.length,
+	  const folderContext = await buildFolderContext(env.DB);
+	  const overview = buildScheduleOverview({ data: parsed.data, updatedAt: timestamp, status: parsed.status });
+	  const recentActivity = normalizeActivityLog(parsed.data.activityLog).slice(0, 3);
+	  return jsonResponse({
+	    id,
+	    name: parsed.name,
+		    url: buildScheduleUrl(request, id),
+		    updatedAt: timestamp,
+		    status: parsed.status,
+		    holdingReason: parsed.holdingReason,
+		    nextAction: parsed.nextAction,
+		    recentActivity,
+		    overview,
+		    tasksCount: parsed.tasks.length,
+		    vacationsCount: parsed.vacations.length,
     folderId: parsed.folderId,
     folderPath: parsed.folderId ? String(folderContext.pathById.get(parsed.folderId) || '') : '',
     createdByEmail,
     updatedByEmail,
+  });
+};
+
+const handleDeleteSchedule = async (request, env, id) => {
+  if (!isAdminSurfaceEnabled(env)) return errorResponse('Not found.', { status: 404 });
+  const readOnlyError = ensureNotReadOnly(env);
+  if (readOnlyError) return readOnlyError;
+
+  const auth = await ensureAdminUser(request, env);
+  if (auth.error) return auth.error;
+
+  const sharedScheduleId = getSharedScheduleId(env);
+  if (sharedScheduleId) {
+    return errorResponse('Schedule deletion is disabled in shared-source mode.', { status: 403 });
+  }
+
+  const schedule = await env.DB
+    .prepare('SELECT id, name, folder_id FROM schedules WHERE id = ? LIMIT 1')
+    .bind(id)
+    .first();
+  if (!schedule) return errorResponse('Schedule not found.', { status: 404 });
+
+  const runResult = await env.DB.prepare('DELETE FROM schedules WHERE id = ?').bind(id).run();
+  if (!runResult?.success) return errorResponse('Failed to delete schedule.', { status: 500 });
+
+  return jsonResponse({
+    ok: true,
+    id,
+    name: String(schedule?.name || '').trim(),
+    folderId: normalizeFolderId(schedule?.folder_id ?? schedule?.folderId),
   });
 };
 
@@ -1422,27 +1981,127 @@ const handlePatchScheduleFolder = async (request, env, id) => {
 
   const folderId = normalizeFolderId(bodyResult.payload.folderId);
 
-  const schedule = await env.DB.prepare('SELECT id FROM schedules WHERE id = ? LIMIT 1').bind(id).first();
-  if (!schedule) return errorResponse('Schedule not found.', { status: 404 });
+	  const schedule = await env.DB
+	    .prepare('SELECT id, data, status, folder_id, updated_by_email FROM schedules WHERE id = ? LIMIT 1')
+	    .bind(id)
+	    .first();
+	  if (!schedule) return errorResponse('Schedule not found.', { status: 404 });
 
   if (folderId != null) {
     const folderExists = await ensureFolderExists(env.DB, folderId);
     if (!folderExists) return errorResponse('folderId does not exist.', { status: 400 });
   }
 
-  const timestamp = nowMs();
-  const runResult = await env.DB
-    .prepare('UPDATE schedules SET folder_id = ?, updated_at = ? WHERE id = ?')
-    .bind(folderId, timestamp, id)
-    .run();
+	  const timestamp = nowMs();
+	  const actorEmail = normalizeEmail(auth.user?.email);
+	  const existingData = parseJsonSafe(String(schedule?.data || ''));
+	  const nextData = isPlainObject(existingData)
+	    ? {
+	        ...existingData,
+	        folderId,
+	        updatedByEmail: actorEmail || normalizeEmail(schedule?.updated_by_email ?? schedule?.updatedByEmail),
+	        updatedAt: timestamp,
+	      }
+	    : {
+	        folderId,
+	        status: normalizeScheduleStatus(schedule?.status),
+	        updatedByEmail: actorEmail,
+	        updatedAt: timestamp,
+	        activityLog: [],
+	      };
+	  const folderContextBefore = await buildFolderContext(env.DB);
+	  const previousFolderId = normalizeFolderId(schedule?.folder_id ?? schedule?.folderId);
+	  const previousFolderPath = previousFolderId ? String(folderContextBefore.pathById.get(previousFolderId) || '') : '미분류';
+	  const nextFolderPath = folderId ? String(folderContextBefore.pathById.get(folderId) || '') : '미분류';
+	  nextData.activityLog = appendActivityEntries(
+	    nextData.activityLog,
+	    [
+	      createActivityEntry({
+	        type: 'folder',
+	        actorEmail,
+	        at: timestamp,
+	        message: `폴더 이동: ${previousFolderPath || '미분류'} -> ${nextFolderPath || '미분류'}`,
+	      }),
+	    ],
+	  );
+	  const runResult = await env.DB
+	    .prepare('UPDATE schedules SET data = ?, folder_id = ?, updated_by_email = ?, updated_at = ? WHERE id = ?')
+	    .bind(JSON.stringify(nextData), folderId, actorEmail, timestamp, id)
+	    .run();
 
   if (!runResult?.success) return errorResponse('Failed to update schedule folder.', { status: 500 });
 
+	  const folderContext = await buildFolderContext(env.DB);
+	  const overview = buildScheduleOverview({ data: nextData, updatedAt: timestamp, status: schedule?.status });
+	  return jsonResponse({
+	    id,
+	    folderId,
+	    folderPath: folderId ? String(folderContext.pathById.get(folderId) || '') : '',
+	    updatedAt: timestamp,
+	    updatedByEmail: actorEmail,
+	    recentActivity: normalizeActivityLog(nextData.activityLog).slice(0, 3),
+	    overview,
+	  });
+	};
+
+const handlePatchFolderOrder = async (request, env, folderId) => {
+  if (!isAdminSurfaceEnabled(env)) return errorResponse('Not found.', { status: 404 });
+  const readOnlyError = ensureNotReadOnly(env);
+  if (readOnlyError) return readOnlyError;
+
+  const auth = await ensureAdminUser(request, env);
+  if (auth.error) return auth.error;
+
+  const bodyResult = await readJsonObjectBody(request);
+  if (!bodyResult.ok) return errorResponse(bodyResult.message, { status: 400 });
+
+  const direction = String(bodyResult.payload.direction || '').trim().toLowerCase();
+  if (direction !== 'up' && direction !== 'down') {
+    return errorResponse("direction must be 'up' or 'down'.", { status: 400 });
+  }
+
+  const currentFolder = await env.DB
+    .prepare('SELECT id, name, parent_id, sort_order FROM folders WHERE id = ? LIMIT 1')
+    .bind(folderId)
+    .first();
+  if (!currentFolder) return errorResponse('Folder not found.', { status: 404 });
+
+  const parentId = normalizeFolderId(currentFolder?.parent_id ?? currentFolder?.parentId);
+  const siblings = await listSiblingFolders(env.DB, parentId);
+  const currentIndex = siblings.findIndex((folder) => folder.id === folderId);
+  if (currentIndex < 0) return errorResponse('Folder not found.', { status: 404 });
+
+  const targetIndex = currentIndex + (direction === 'up' ? -1 : 1);
+  if (targetIndex < 0 || targetIndex >= siblings.length) {
+    const folderContext = await buildFolderContext(env.DB);
+    return jsonResponse({
+      ok: true,
+      moved: false,
+      id: folderId,
+      parentId,
+      sortOrder: Number(siblings[currentIndex]?.sortOrder) || currentIndex + 1,
+      path: String(folderContext.pathById.get(folderId) || currentFolder?.name || folderId),
+    });
+  }
+
+  const reordered = [...siblings];
+  const [movedFolder] = reordered.splice(currentIndex, 1);
+  reordered.splice(targetIndex, 0, movedFolder);
+
+  const timestamp = nowMs();
+  reordered.forEach((folder, index) => {
+    folder.sortOrder = index + 1;
+  });
+  await resequenceSiblingFolders(env.DB, reordered, timestamp);
+
   const folderContext = await buildFolderContext(env.DB);
   return jsonResponse({
-    id,
-    folderId,
-    folderPath: folderId ? String(folderContext.pathById.get(folderId) || '') : '',
+    ok: true,
+    moved: true,
+    id: folderId,
+    parentId,
+    sortOrder: targetIndex + 1,
+    path: String(folderContext.pathById.get(folderId) || currentFolder?.name || folderId),
     updatedAt: timestamp,
   });
 };
@@ -1619,6 +2278,22 @@ const handleRequest = async (request, env) => {
     return textResponse('HL Scheduler public schedules worker');
   }
 
+  if (pathname.startsWith('/api/v2/')) {
+    return handleCollabRequest({
+      request,
+      env,
+      url,
+      method,
+      pathname,
+      helpers: {
+        jsonResponse,
+        errorResponse,
+        readJsonObjectBody,
+        ensureAuthenticatedUser,
+      },
+    });
+  }
+
   if (method === 'POST' && pathname === '/api/auth/register') {
     return handleRegisterAuth(request, env);
   }
@@ -1674,6 +2349,7 @@ const handleRequest = async (request, env) => {
     if (!id) return errorResponse('Invalid schedule id.', { status: 400 });
     if (method === 'GET') return handleGetSchedule(request, env, id);
     if (method === 'PUT') return handleUpdateSchedule(request, env, id);
+    if (method === 'DELETE') return handleDeleteSchedule(request, env, id);
   }
 
   if (method === 'POST' && pathname === '/api/schedules') {
@@ -1693,6 +2369,13 @@ const handleRequest = async (request, env) => {
 
   if (method === 'POST' && pathname === '/api/folders') {
     return handleCreateFolder(request, env);
+  }
+
+  const folderOrderMatch = /^\/api\/folders\/([^/]+)\/order$/.exec(pathname);
+  if (method === 'PATCH' && folderOrderMatch) {
+    const id = decodePathSegment(folderOrderMatch[1]);
+    if (!id) return errorResponse('Invalid folder id.', { status: 400 });
+    return handlePatchFolderOrder(request, env, id);
   }
 
   const folderIdMatch = /^\/api\/folders\/([^/]+)$/.exec(pathname);
@@ -1735,3 +2418,5 @@ export default {
     }
   },
 };
+
+export { CollabWorkspaceRoom };

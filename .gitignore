@@ -24,3 +24,4 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 .vite-dev.log
+server/public-schedules-worker/wrangler.generated.*.toml

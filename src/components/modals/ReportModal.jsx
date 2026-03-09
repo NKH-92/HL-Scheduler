@@ -2,6 +2,12 @@
 import GanttChart from '../GanttChart';
 import { FileText, XIcon } from '../Icons';
 
+const VIEW_MODE_LABELS = {
+  Day: '일 (Day)',
+  Week: '주 (Week)',
+  Month: '월 (Month)',
+};
+
 function ReportModal({
   isOpen,
   onClose,
@@ -44,7 +50,7 @@ function ReportModal({
 
       <div className="custom-scrollbar flex-1 space-y-5 overflow-y-auto bg-slate-50/70 p-6">
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <label className="field-label">Gantt View Mode</label>
+          <label className="field-label">간트 보기 기준</label>
           <div className="flex flex-wrap gap-2">
             {['Day', 'Week', 'Month'].map((mode) => (
               <button
@@ -57,7 +63,7 @@ function ReportModal({
                 }`}
                 type="button"
               >
-                {mode}
+                {VIEW_MODE_LABELS[mode] || mode}
               </button>
             ))}
           </div>

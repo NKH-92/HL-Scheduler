@@ -1,6 +1,6 @@
 {
   "name": "scheduler",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "description": "HL Scheduler web app",
   "author": "anonymous",
   "private": true,
@@ -9,7 +9,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --experimental-specifier-resolution=node scripts/sanity-check.mjs"
+    "test": "node --experimental-specifier-resolution=node scripts/sanity-check.mjs",
+    "test:collab": "node --experimental-specifier-resolution=node scripts/collab-sanity-check.mjs",
+    "cf:build:public": "node scripts/cloudflare/build-pages.mjs --role public",
+    "cf:build:admin": "node scripts/cloudflare/build-pages.mjs --role admin",
+    "cf:render:worker:public": "node scripts/cloudflare/render-wrangler-config.mjs --surface public",
+    "cf:render:worker:admin": "node scripts/cloudflare/render-wrangler-config.mjs --surface admin",
+    "cf:smoke": "node scripts/cloudflare/smoke-test.mjs"
   },
   "dependencies": {
     "html-to-image": "^1.11.11",
