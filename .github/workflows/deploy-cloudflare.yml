@@ -28,6 +28,17 @@ jobs:
     outputs:
       deploy_env: ${{ steps.resolve.outputs.deploy_env }}
       pages_branch: ${{ steps.resolve.outputs.pages_branch }}
+      workers_subdomain: ${{ steps.resolve.outputs.workers_subdomain }}
+      public_worker_name: ${{ steps.resolve.outputs.public_worker_name }}
+      admin_worker_name: ${{ steps.resolve.outputs.admin_worker_name }}
+      public_pages_project: ${{ steps.resolve.outputs.public_pages_project }}
+      admin_pages_project: ${{ steps.resolve.outputs.admin_pages_project }}
+      public_api_url: ${{ steps.resolve.outputs.public_api_url }}
+      admin_api_url: ${{ steps.resolve.outputs.admin_api_url }}
+      public_app_url: ${{ steps.resolve.outputs.public_app_url }}
+      admin_app_url: ${{ steps.resolve.outputs.admin_app_url }}
+      d1_database_name: ${{ steps.resolve.outputs.d1_database_name }}
+      public_enable_admin_endpoints: ${{ steps.resolve.outputs.public_enable_admin_endpoints }}
     steps:
       - name: Resolve deployment environment
         id: resolve
@@ -50,8 +61,103 @@ jobs:
             PAGES_BRANCH="staging"
           fi
 
+          WORKERS_SUBDOMAIN="${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}"
+          if [[ -z "$WORKERS_SUBDOMAIN" ]]; then
+            WORKERS_SUBDOMAIN="skarhkdgus7"
+          fi
+
+          if [[ "$DEPLOY_ENV" == "production" ]]; then
+            PUBLIC_WORKER_NAME="${{ vars.CLOUDFLARE_PUBLIC_WORKER_NAME }}"
+            ADMIN_WORKER_NAME="${{ vars.CLOUDFLARE_ADMIN_WORKER_NAME }}"
+            PUBLIC_PAGES_PROJECT="${{ vars.CLOUDFLARE_PUBLIC_PAGES_PROJECT }}"
+            ADMIN_PAGES_PROJECT="${{ vars.CLOUDFLARE_ADMIN_PAGES_PROJECT }}"
+            D1_DATABASE_NAME="${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}"
+          else
+            PUBLIC_WORKER_NAME="${{ vars.CLOUDFLARE_PUBLIC_WORKER_NAME }}"
+            ADMIN_WORKER_NAME="${{ vars.CLOUDFLARE_ADMIN_WORKER_NAME }}"
+            PUBLIC_PAGES_PROJECT="${{ vars.CLOUDFLARE_PUBLIC_PAGES_PROJECT }}"
+            ADMIN_PAGES_PROJECT="${{ vars.CLOUDFLARE_ADMIN_PAGES_PROJECT }}"
+            D1_DATABASE_NAME="${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}"
+          fi
+
+          if [[ -z "$PUBLIC_WORKER_NAME" ]]; then
+            if [[ "$DEPLOY_ENV" == "production" ]]; then
+              PUBLIC_WORKER_NAME="hl-scheduler-public-api"
+            else
+              PUBLIC_WORKER_NAME="hl-scheduler-public-api-staging"
+            fi
+          fi
+
+          if [[ -z "$ADMIN_WORKER_NAME" ]]; then
+            if [[ "$DEPLOY_ENV" == "production" ]]; then
+              ADMIN_WORKER_NAME="hl-scheduler-admin-api"
+            else
+              ADMIN_WORKER_NAME="hl-scheduler-admin-api-staging"
+            fi
+          fi
+
+          if [[ -z "$PUBLIC_PAGES_PROJECT" ]]; then
+            if [[ "$DEPLOY_ENV" == "production" ]]; then
+              PUBLIC_PAGES_PROJECT="hl-scheduler-public"
+            else
+              PUBLIC_PAGES_PROJECT="hl-scheduler-public-staging"
+            fi
+          fi
+
+          if [[ -z "$ADMIN_PAGES_PROJECT" ]]; then
+            if [[ "$DEPLOY_ENV" == "production" ]]; then
+              ADMIN_PAGES_PROJECT="hl-scheduler-admin"
+            else
+              ADMIN_PAGES_PROJECT="hl-scheduler-admin-staging"
+            fi
+          fi
+
+          if [[ -z "$D1_DATABASE_NAME" ]]; then
+            if [[ "$DEPLOY_ENV" == "production" ]]; then
+              D1_DATABASE_NAME="hl-scheduler"
+            else
+              D1_DATABASE_NAME="hl-scheduler-staging"
+            fi
+          fi
+
+          PUBLIC_API_URL="${{ vars.CLOUDFLARE_PUBLIC_API_URL }}"
+          if [[ -z "$PUBLIC_API_URL" ]]; then
+            PUBLIC_API_URL="https://${PUBLIC_WORKER_NAME}.${WORKERS_SUBDOMAIN}.workers.dev"
+          fi
+
+          ADMIN_API_URL="${{ vars.CLOUDFLARE_ADMIN_API_URL }}"
+          if [[ -z "$ADMIN_API_URL" ]]; then
+            ADMIN_API_URL="$PUBLIC_API_URL"
+          fi
+
+          PUBLIC_APP_URL="${{ vars.CLOUDFLARE_PUBLIC_APP_URL }}"
+          if [[ -z "$PUBLIC_APP_URL" ]]; then
+            PUBLIC_APP_URL="https://${PUBLIC_PAGES_PROJECT}.pages.dev"
+          fi
+
+          ADMIN_APP_URL="${{ vars.CLOUDFLARE_ADMIN_APP_URL }}"
+          if [[ -z "$ADMIN_APP_URL" ]]; then
+            ADMIN_APP_URL="https://${ADMIN_PAGES_PROJECT}.pages.dev"
+          fi
+
+          PUBLIC_ENABLE_ADMIN_ENDPOINTS="${{ vars.CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS }}"
+          if [[ -z "$PUBLIC_ENABLE_ADMIN_ENDPOINTS" ]]; then
+            PUBLIC_ENABLE_ADMIN_ENDPOINTS="1"
+          fi
+
           echo "deploy_env=$DEPLOY_ENV" >> "$GITHUB_OUTPUT"
           echo "pages_branch=$PAGES_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "workers_subdomain=$WORKERS_SUBDOMAIN" >> "$GITHUB_OUTPUT"
+          echo "public_worker_name=$PUBLIC_WORKER_NAME" >> "$GITHUB_OUTPUT"
+          echo "admin_worker_name=$ADMIN_WORKER_NAME" >> "$GITHUB_OUTPUT"
+          echo "public_pages_project=$PUBLIC_PAGES_PROJECT" >> "$GITHUB_OUTPUT"
+          echo "admin_pages_project=$ADMIN_PAGES_PROJECT" >> "$GITHUB_OUTPUT"
+          echo "public_api_url=$PUBLIC_API_URL" >> "$GITHUB_OUTPUT"
+          echo "admin_api_url=$ADMIN_API_URL" >> "$GITHUB_OUTPUT"
+          echo "public_app_url=$PUBLIC_APP_URL" >> "$GITHUB_OUTPUT"
+          echo "admin_app_url=$ADMIN_APP_URL" >> "$GITHUB_OUTPUT"
+          echo "d1_database_name=$D1_DATABASE_NAME" >> "$GITHUB_OUTPUT"
+          echo "public_enable_admin_endpoints=$PUBLIC_ENABLE_ADMIN_ENDPOINTS" >> "$GITHUB_OUTPUT"
 
   verify:
     runs-on: ubuntu-latest
@@ -60,18 +166,18 @@ jobs:
     environment: ${{ needs.prepare.outputs.deploy_env }}
     env:
       DEPLOY_ENV: ${{ needs.prepare.outputs.deploy_env }}
-      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}
+      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ needs.prepare.outputs.workers_subdomain }}
       CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
-      CLOUDFLARE_D1_DATABASE_NAME: ${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}
+      CLOUDFLARE_D1_DATABASE_NAME: ${{ needs.prepare.outputs.d1_database_name }}
       CLOUDFLARE_D1_PREVIEW_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_PREVIEW_DATABASE_ID }}
-      CLOUDFLARE_PUBLIC_WORKER_NAME: ${{ vars.CLOUDFLARE_PUBLIC_WORKER_NAME }}
-      CLOUDFLARE_ADMIN_WORKER_NAME: ${{ vars.CLOUDFLARE_ADMIN_WORKER_NAME }}
-      CLOUDFLARE_PUBLIC_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PUBLIC_PAGES_PROJECT }}
-      CLOUDFLARE_ADMIN_PAGES_PROJECT: ${{ vars.CLOUDFLARE_ADMIN_PAGES_PROJECT }}
-      CLOUDFLARE_PUBLIC_API_URL: ${{ vars.CLOUDFLARE_PUBLIC_API_URL }}
-      CLOUDFLARE_ADMIN_API_URL: ${{ vars.CLOUDFLARE_ADMIN_API_URL }}
-      CLOUDFLARE_PUBLIC_APP_URL: ${{ vars.CLOUDFLARE_PUBLIC_APP_URL }}
-      CLOUDFLARE_ADMIN_APP_URL: ${{ vars.CLOUDFLARE_ADMIN_APP_URL }}
+      CLOUDFLARE_PUBLIC_WORKER_NAME: ${{ needs.prepare.outputs.public_worker_name }}
+      CLOUDFLARE_ADMIN_WORKER_NAME: ${{ needs.prepare.outputs.admin_worker_name }}
+      CLOUDFLARE_PUBLIC_PAGES_PROJECT: ${{ needs.prepare.outputs.public_pages_project }}
+      CLOUDFLARE_ADMIN_PAGES_PROJECT: ${{ needs.prepare.outputs.admin_pages_project }}
+      CLOUDFLARE_PUBLIC_API_URL: ${{ needs.prepare.outputs.public_api_url }}
+      CLOUDFLARE_ADMIN_API_URL: ${{ needs.prepare.outputs.admin_api_url }}
+      CLOUDFLARE_PUBLIC_APP_URL: ${{ needs.prepare.outputs.public_app_url }}
+      CLOUDFLARE_ADMIN_APP_URL: ${{ needs.prepare.outputs.admin_app_url }}
       CLOUDFLARE_ALLOWED_ADMIN_EMAILS: ${{ vars.CLOUDFLARE_ALLOWED_ADMIN_EMAILS }}
       CLOUDFLARE_ALLOWED_FROM_DOMAIN: ${{ vars.CLOUDFLARE_ALLOWED_FROM_DOMAIN }}
       CLOUDFLARE_CORS_ALLOWED_ORIGINS: ${{ vars.CLOUDFLARE_CORS_ALLOWED_ORIGINS }}
@@ -85,7 +191,7 @@ jobs:
       CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS }}
       CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS }}
       CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL }}
-      CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS }}
+      CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS: ${{ needs.prepare.outputs.public_enable_admin_endpoints }}
       CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL }}
       CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS }}
     steps:
@@ -118,18 +224,18 @@ jobs:
     environment: ${{ needs.prepare.outputs.deploy_env }}
     env:
       DEPLOY_ENV: ${{ needs.prepare.outputs.deploy_env }}
-      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}
+      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ needs.prepare.outputs.workers_subdomain }}
       CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
-      CLOUDFLARE_D1_DATABASE_NAME: ${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}
+      CLOUDFLARE_D1_DATABASE_NAME: ${{ needs.prepare.outputs.d1_database_name }}
       CLOUDFLARE_D1_PREVIEW_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_PREVIEW_DATABASE_ID }}
-      CLOUDFLARE_PUBLIC_WORKER_NAME: ${{ vars.CLOUDFLARE_PUBLIC_WORKER_NAME }}
-      CLOUDFLARE_ADMIN_WORKER_NAME: ${{ vars.CLOUDFLARE_ADMIN_WORKER_NAME }}
-      CLOUDFLARE_PUBLIC_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PUBLIC_PAGES_PROJECT }}
-      CLOUDFLARE_ADMIN_PAGES_PROJECT: ${{ vars.CLOUDFLARE_ADMIN_PAGES_PROJECT }}
-      CLOUDFLARE_PUBLIC_API_URL: ${{ vars.CLOUDFLARE_PUBLIC_API_URL }}
-      CLOUDFLARE_ADMIN_API_URL: ${{ vars.CLOUDFLARE_ADMIN_API_URL }}
-      CLOUDFLARE_PUBLIC_APP_URL: ${{ vars.CLOUDFLARE_PUBLIC_APP_URL }}
-      CLOUDFLARE_ADMIN_APP_URL: ${{ vars.CLOUDFLARE_ADMIN_APP_URL }}
+      CLOUDFLARE_PUBLIC_WORKER_NAME: ${{ needs.prepare.outputs.public_worker_name }}
+      CLOUDFLARE_ADMIN_WORKER_NAME: ${{ needs.prepare.outputs.admin_worker_name }}
+      CLOUDFLARE_PUBLIC_PAGES_PROJECT: ${{ needs.prepare.outputs.public_pages_project }}
+      CLOUDFLARE_ADMIN_PAGES_PROJECT: ${{ needs.prepare.outputs.admin_pages_project }}
+      CLOUDFLARE_PUBLIC_API_URL: ${{ needs.prepare.outputs.public_api_url }}
+      CLOUDFLARE_ADMIN_API_URL: ${{ needs.prepare.outputs.admin_api_url }}
+      CLOUDFLARE_PUBLIC_APP_URL: ${{ needs.prepare.outputs.public_app_url }}
+      CLOUDFLARE_ADMIN_APP_URL: ${{ needs.prepare.outputs.admin_app_url }}
       CLOUDFLARE_ALLOWED_ADMIN_EMAILS: ${{ vars.CLOUDFLARE_ALLOWED_ADMIN_EMAILS }}
       CLOUDFLARE_ALLOWED_FROM_DOMAIN: ${{ vars.CLOUDFLARE_ALLOWED_FROM_DOMAIN }}
       CLOUDFLARE_CORS_ALLOWED_ORIGINS: ${{ vars.CLOUDFLARE_CORS_ALLOWED_ORIGINS }}
@@ -143,7 +249,7 @@ jobs:
       CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS }}
       CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS }}
       CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL }}
-      CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS }}
+      CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS: ${{ needs.prepare.outputs.public_enable_admin_endpoints }}
       CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL }}
       CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS }}
     steps:
@@ -183,18 +289,18 @@ jobs:
     environment: ${{ needs.prepare.outputs.deploy_env }}
     env:
       DEPLOY_ENV: ${{ needs.prepare.outputs.deploy_env }}
-      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}
+      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ needs.prepare.outputs.workers_subdomain }}
       CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
-      CLOUDFLARE_D1_DATABASE_NAME: ${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}
+      CLOUDFLARE_D1_DATABASE_NAME: ${{ needs.prepare.outputs.d1_database_name }}
       CLOUDFLARE_D1_PREVIEW_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_PREVIEW_DATABASE_ID }}
-      CLOUDFLARE_PUBLIC_WORKER_NAME: ${{ vars.CLOUDFLARE_PUBLIC_WORKER_NAME }}
-      CLOUDFLARE_ADMIN_WORKER_NAME: ${{ vars.CLOUDFLARE_ADMIN_WORKER_NAME }}
-      CLOUDFLARE_PUBLIC_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PUBLIC_PAGES_PROJECT }}
-      CLOUDFLARE_ADMIN_PAGES_PROJECT: ${{ vars.CLOUDFLARE_ADMIN_PAGES_PROJECT }}
-      CLOUDFLARE_PUBLIC_API_URL: ${{ vars.CLOUDFLARE_PUBLIC_API_URL }}
-      CLOUDFLARE_ADMIN_API_URL: ${{ vars.CLOUDFLARE_ADMIN_API_URL }}
-      CLOUDFLARE_PUBLIC_APP_URL: ${{ vars.CLOUDFLARE_PUBLIC_APP_URL }}
-      CLOUDFLARE_ADMIN_APP_URL: ${{ vars.CLOUDFLARE_ADMIN_APP_URL }}
+      CLOUDFLARE_PUBLIC_WORKER_NAME: ${{ needs.prepare.outputs.public_worker_name }}
+      CLOUDFLARE_ADMIN_WORKER_NAME: ${{ needs.prepare.outputs.admin_worker_name }}
+      CLOUDFLARE_PUBLIC_PAGES_PROJECT: ${{ needs.prepare.outputs.public_pages_project }}
+      CLOUDFLARE_ADMIN_PAGES_PROJECT: ${{ needs.prepare.outputs.admin_pages_project }}
+      CLOUDFLARE_PUBLIC_API_URL: ${{ needs.prepare.outputs.public_api_url }}
+      CLOUDFLARE_ADMIN_API_URL: ${{ needs.prepare.outputs.admin_api_url }}
+      CLOUDFLARE_PUBLIC_APP_URL: ${{ needs.prepare.outputs.public_app_url }}
+      CLOUDFLARE_ADMIN_APP_URL: ${{ needs.prepare.outputs.admin_app_url }}
       CLOUDFLARE_ALLOWED_ADMIN_EMAILS: ${{ vars.CLOUDFLARE_ALLOWED_ADMIN_EMAILS }}
       CLOUDFLARE_ALLOWED_FROM_DOMAIN: ${{ vars.CLOUDFLARE_ALLOWED_FROM_DOMAIN }}
       CLOUDFLARE_CORS_ALLOWED_ORIGINS: ${{ vars.CLOUDFLARE_CORS_ALLOWED_ORIGINS }}
@@ -208,7 +314,7 @@ jobs:
       CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS }}
       CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS }}
       CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL }}
-      CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS }}
+      CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS: ${{ needs.prepare.outputs.public_enable_admin_endpoints }}
       CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL }}
       CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS }}
     steps:
@@ -252,18 +358,18 @@ jobs:
     environment: ${{ needs.prepare.outputs.deploy_env }}
     env:
       DEPLOY_ENV: ${{ needs.prepare.outputs.deploy_env }}
-      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}
+      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ needs.prepare.outputs.workers_subdomain }}
       CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
-      CLOUDFLARE_D1_DATABASE_NAME: ${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}
+      CLOUDFLARE_D1_DATABASE_NAME: ${{ needs.prepare.outputs.d1_database_name }}
       CLOUDFLARE_D1_PREVIEW_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_PREVIEW_DATABASE_ID }}
-      CLOUDFLARE_PUBLIC_WORKER_NAME: ${{ vars.CLOUDFLARE_PUBLIC_WORKER_NAME }}
-      CLOUDFLARE_ADMIN_WORKER_NAME: ${{ vars.CLOUDFLARE_ADMIN_WORKER_NAME }}
-      CLOUDFLARE_PUBLIC_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PUBLIC_PAGES_PROJECT }}
-      CLOUDFLARE_ADMIN_PAGES_PROJECT: ${{ vars.CLOUDFLARE_ADMIN_PAGES_PROJECT }}
-      CLOUDFLARE_PUBLIC_API_URL: ${{ vars.CLOUDFLARE_PUBLIC_API_URL }}
-      CLOUDFLARE_ADMIN_API_URL: ${{ vars.CLOUDFLARE_ADMIN_API_URL }}
-      CLOUDFLARE_PUBLIC_APP_URL: ${{ vars.CLOUDFLARE_PUBLIC_APP_URL }}
-      CLOUDFLARE_ADMIN_APP_URL: ${{ vars.CLOUDFLARE_ADMIN_APP_URL }}
+      CLOUDFLARE_PUBLIC_WORKER_NAME: ${{ needs.prepare.outputs.public_worker_name }}
+      CLOUDFLARE_ADMIN_WORKER_NAME: ${{ needs.prepare.outputs.admin_worker_name }}
+      CLOUDFLARE_PUBLIC_PAGES_PROJECT: ${{ needs.prepare.outputs.public_pages_project }}
+      CLOUDFLARE_ADMIN_PAGES_PROJECT: ${{ needs.prepare.outputs.admin_pages_project }}
+      CLOUDFLARE_PUBLIC_API_URL: ${{ needs.prepare.outputs.public_api_url }}
+      CLOUDFLARE_ADMIN_API_URL: ${{ needs.prepare.outputs.admin_api_url }}
+      CLOUDFLARE_PUBLIC_APP_URL: ${{ needs.prepare.outputs.public_app_url }}
+      CLOUDFLARE_ADMIN_APP_URL: ${{ needs.prepare.outputs.admin_app_url }}
       CLOUDFLARE_ALLOWED_ADMIN_EMAILS: ${{ vars.CLOUDFLARE_ALLOWED_ADMIN_EMAILS }}
       CLOUDFLARE_ALLOWED_FROM_DOMAIN: ${{ vars.CLOUDFLARE_ALLOWED_FROM_DOMAIN }}
       CLOUDFLARE_CORS_ALLOWED_ORIGINS: ${{ vars.CLOUDFLARE_CORS_ALLOWED_ORIGINS }}
@@ -277,7 +383,7 @@ jobs:
       CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_WINDOW_SECONDS }}
       CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS: ${{ vars.CLOUDFLARE_AUTH_RATE_LIMIT_MAX_ATTEMPTS }}
       CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_PUBLIC_REQUIRE_ACCESS_EMAIL }}
-      CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS }}
+      CLOUDFLARE_PUBLIC_ENABLE_ADMIN_ENDPOINTS: ${{ needs.prepare.outputs.public_enable_admin_endpoints }}
       CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL: ${{ vars.CLOUDFLARE_ADMIN_REQUIRE_ACCESS_EMAIL }}
       CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS: ${{ vars.CLOUDFLARE_ADMIN_ENABLE_ADMIN_ENDPOINTS }}
     steps:
