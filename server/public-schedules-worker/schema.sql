@@ -16,9 +16,14 @@ CREATE TABLE IF NOT EXISTS schedules (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   data TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'planning',
   tasks_count INTEGER NOT NULL DEFAULT 0,
   vacations_count INTEGER NOT NULL DEFAULT 0,
   folder_id TEXT,
+  holding_reason TEXT,
+  next_action TEXT,
+  recent_activity_json TEXT,
+  overview_json TEXT,
   created_by_email TEXT,
   updated_by_email TEXT,
   created_at INTEGER NOT NULL,
@@ -28,6 +33,8 @@ CREATE TABLE IF NOT EXISTS schedules (
 CREATE INDEX IF NOT EXISTS schedules_created_at ON schedules(created_at DESC);
 CREATE INDEX IF NOT EXISTS schedules_name ON schedules(name);
 CREATE INDEX IF NOT EXISTS schedules_folder_id ON schedules(folder_id);
+CREATE INDEX IF NOT EXISTS schedules_updated_created_idx ON schedules(updated_at DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS schedules_folder_updated_created_idx ON schedules(folder_id, updated_at DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS schedules_updated_by_email_idx ON schedules(updated_by_email);
 
 CREATE TABLE IF NOT EXISTS users (

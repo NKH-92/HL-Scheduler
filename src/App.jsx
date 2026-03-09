@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AppHeader from './components/AppHeader';
 import Dashboard from './components/Dashboard';
 import Help from './components/Help';
@@ -719,7 +719,7 @@ function App() {
   const generateWordReport = async () => {
     setIsGenerating(true);
     try {
-      const targetId = 'gantt-report-export-target';
+      const targetId = 'gantt-report-preview';
       const ganttElement = document.getElementById(targetId);
       if (!ganttElement) throw new Error('Chart not found');
       const { getFontEmbedCSS, toPng, html2canvas } = await loadImageExportLibs();
@@ -1817,21 +1817,6 @@ function App() {
         isGenerating={isGenerating}
       />
 
-      {isReportModalOpen && (
-        <div style={{ position: 'fixed', left: '-9999px', top: '0px', pointerEvents: 'none' }}>
-          <GanttChart
-            tasks={reportSourceTasks}
-            vacations={vacations}
-            viewMode={reportGanttMode}
-            rangePadding={rangePadding[reportGanttMode] || { before: 0, after: 0 }}
-            fitEnabled
-            isExportMode
-            exportId="gantt-report-export-target"
-            exportViewportWidth={REPORT_CHART_WIDTH_PX}
-            exportLeftPaneWidth={GANTT_EXPORT_LEFT_PANE_PX}
-          />
-        </div>
-      )}
 
       <ImageExportModal
         isOpen={isImageExportModalOpen}

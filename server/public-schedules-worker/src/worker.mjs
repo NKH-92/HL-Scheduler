@@ -13,6 +13,8 @@ const MAX_HOLDING_REASON_LENGTH = 280;
 const MAX_NEXT_ACTION_LENGTH = 280;
 const MAX_ACTIVITY_LOG_ENTRIES = 20;
 const STALE_PROJECT_DAYS = 7;
+const MAX_LIST_OFFSET = 5000;
+const MAX_RECENT_ACTIVITY_SUMMARY_ENTRIES = 5;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_LENGTH = 128;
@@ -36,6 +38,19 @@ const SCHEDULE_STATUS_CLOSED = 'closed';
 const SCHEDULE_STATUS_DEFAULT = SCHEDULE_STATUS_PLANNING;
 
 let runtimeSchemaReadyPromise = null;
+
+const SCHEDULE_SUMMARY_COLUMNS = [
+  'holding_reason',
+  'next_action',
+  'recent_activity_json',
+  'overview_json',
+];
+const SCHEDULE_SUMMARY_SELECT_SQL = [
+  'holding_reason',
+  'next_action',
+  'recent_activity_json',
+  'overview_json',
+].join(', ');
 
 const parseBoolean = (value, fallback = false) => {
   if (value == null) return fallback;
@@ -349,6 +364,68 @@ const createActivityEntry = ({ type = 'update', message = '', actorEmail = '', a
 
 const appendActivityEntries = (existingEntries, newEntries) =>
   normalizeActivityLog([...(Array.isArray(newEntries) ? newEntries : []), ...normalizeActivityLog(existingEntries)]);
+
+const buildScheduleSummaryPayload = ({ data = null, updatedAt = null, status = SCHEDULE_STATUS_DEFAULT } = {}) => {
+  const safeData = isPlainObject(data) ? data : {};
+  return {
+    holdingReason: normalizeShortText(safeData.holdingReason, { maxLength: MAX_HOLDING_REASON_LENGTH }),
+    nextAction: normalizeShortText(safeData.nextAction, { maxLength: MAX_NEXT_ACTION_LENGTH }),
+    recentActivity: normalizeActivityLog(safeData.activityLog).slice(0, MAX_RECENT_ACTIVITY_SUMMARY_ENTRIES),
+    overview: buildScheduleOverview({ data: safeData, updatedAt, status }),
+  };
+};
+
+const encodeScheduleSummaryPayload = (summary) => ({
+  holdingReason: normalizeShortText(summary?.holdingReason, { maxLength: MAX_HOLDING_REASON_LENGTH }),
+  nextAction: normalizeShortText(summary?.nextAction, { maxLength: MAX_NEXT_ACTION_LENGTH }),
+  recentActivityJson: JSON.stringify(Array.isArray(summary?.recentActivity) ? summary.recentActivity : []),
+  overviewJson: JSON.stringify(isPlainObject(summary?.overview) ? summary.overview : {}),
+});
+
+const readScheduleSummaryFromRow = (row) => {
+  const hasSummaryColumns = SCHEDULE_SUMMARY_COLUMNS.some((key) => Object.prototype.hasOwnProperty.call(row || {}, key));
+  if (!hasSummaryColumns) return null;
+  const recentActivity = parseJsonSafe(String(row?.recent_activity_json || row?.recentActivityJson || '[]'));
+  const overview = parseJsonSafe(String(row?.overview_json || row?.overviewJson || '{}'));
+  return {
+    holdingReason: normalizeShortText(row?.holding_reason ?? row?.holdingReason ?? '', {
+      maxLength: MAX_HOLDING_REASON_LENGTH,
+    }),
+    nextAction: normalizeShortText(row?.next_action ?? row?.nextAction ?? '', {
+      maxLength: MAX_NEXT_ACTION_LENGTH,
+    }),
+    recentActivity: normalizeActivityLog(recentActivity).slice(0, MAX_RECENT_ACTIVITY_SUMMARY_ENTRIES),
+    overview: isPlainObject(overview) ? overview : buildScheduleOverview({
+      data: { activityLog: Array.isArray(recentActivity) ? recentActivity : [] },
+      updatedAt: row?.updated_at ?? row?.updatedAt,
+      status: row?.status,
+    }),
+  };
+};
+
+const resolveFolderPath = async (db, folderId) => {
+  const safeFolderId = normalizeFolderId(folderId);
+  if (!safeFolderId) return '';
+  const result = await db
+    .prepare(
+      [
+        'WITH RECURSIVE folder_path(id, name, parent_id, depth) AS (',
+        'SELECT id, name, parent_id, 0 FROM folders WHERE id = ?',
+        'UNION ALL',
+        'SELECT f.id, f.name, f.parent_id, folder_path.depth + 1',
+        'FROM folders f',
+        'JOIN folder_path ON folder_path.parent_id = f.id',
+        ')',
+        'SELECT name, depth FROM folder_path ORDER BY depth DESC',
+      ].join(' '),
+    )
+    .bind(safeFolderId)
+    .all();
+  return parseD1Rows(result)
+    .map((row) => String(row?.name || '').trim())
+    .filter(Boolean)
+    .join(' / ');
+};
 
 const buildScheduleOverview = ({ data = null, updatedAt = null, status = SCHEDULE_STATUS_DEFAULT } = {}) => {
   const safeData = isPlainObject(data) ? data : {};
@@ -876,6 +953,10 @@ const ensureRuntimeSchema = async (env) => {
           'tasks_count INTEGER NOT NULL DEFAULT 0,',
           'vacations_count INTEGER NOT NULL DEFAULT 0,',
           'folder_id TEXT,',
+          'holding_reason TEXT,',
+          'next_action TEXT,',
+          'recent_activity_json TEXT,',
+          'overview_json TEXT,',
           'created_by_email TEXT,',
           'updated_by_email TEXT,',
           'created_at INTEGER NOT NULL,',
@@ -888,6 +969,10 @@ const ensureRuntimeSchema = async (env) => {
 	    const alterStatements = [
 	      `ALTER TABLE schedules ADD COLUMN status TEXT NOT NULL DEFAULT '${SCHEDULE_STATUS_DEFAULT}'`,
 	      'ALTER TABLE schedules ADD COLUMN folder_id TEXT',
+	      'ALTER TABLE schedules ADD COLUMN holding_reason TEXT',
+	      'ALTER TABLE schedules ADD COLUMN next_action TEXT',
+	      'ALTER TABLE schedules ADD COLUMN recent_activity_json TEXT',
+	      'ALTER TABLE schedules ADD COLUMN overview_json TEXT',
 	      'ALTER TABLE schedules ADD COLUMN created_by_email TEXT',
 	      'ALTER TABLE schedules ADD COLUMN updated_by_email TEXT',
 	    ];
@@ -923,6 +1008,8 @@ const ensureRuntimeSchema = async (env) => {
 	    await env.DB.prepare('CREATE INDEX IF NOT EXISTS schedules_folder_id ON schedules(folder_id)').run();
 	    await env.DB.prepare('CREATE INDEX IF NOT EXISTS schedules_status_idx ON schedules(status)').run();
 	    await env.DB.prepare('CREATE INDEX IF NOT EXISTS schedules_updated_by_email_idx ON schedules(updated_by_email)').run();
+	    await env.DB.prepare('CREATE INDEX IF NOT EXISTS schedules_updated_created_idx ON schedules(updated_at DESC, created_at DESC)').run();
+	    await env.DB.prepare('CREATE INDEX IF NOT EXISTS schedules_folder_updated_created_idx ON schedules(folder_id, updated_at DESC, created_at DESC)').run();
 
     await env.DB
       .prepare(
@@ -1186,14 +1273,15 @@ const listSiblingFolders = async (db, parentId) => {
 };
 
 const resequenceSiblingFolders = async (db, siblings, timestamp) => {
+  const statements = [];
   for (let index = 0; index < siblings.length; index += 1) {
     const folder = siblings[index];
     const nextSortOrder = index + 1;
-    await db
-      .prepare('UPDATE folders SET sort_order = ?, updated_at = ? WHERE id = ?')
-      .bind(nextSortOrder, timestamp, folder.id)
-      .run();
+    statements.push(
+      db.prepare('UPDATE folders SET sort_order = ?, updated_at = ? WHERE id = ?').bind(nextSortOrder, timestamp, folder.id),
+    );
   }
+  if (statements.length > 0) await db.batch(statements);
 };
 
 const collectDescendantFolderIds = (folderId, childrenByParent) => {
@@ -1221,12 +1309,10 @@ const collectDescendantFolderIds = (folderId, childrenByParent) => {
 const scheduleRowToSummary = (row, pathById) => {
   const folderId = normalizeFolderId(row?.folder_id ?? row?.folderId);
   const status = normalizeScheduleStatus(row?.status);
-  const parsedData = parseJsonSafe(String(row?.data || ''));
+  const cachedSummary = readScheduleSummaryFromRow(row);
+  const parsedData = cachedSummary ? null : parseJsonSafe(String(row?.data || ''));
   const safeData = isPlainObject(parsedData) ? parsedData : {};
-  const holdingReason = normalizeShortText(safeData.holdingReason, { maxLength: MAX_HOLDING_REASON_LENGTH });
-  const nextAction = normalizeShortText(safeData.nextAction, { maxLength: MAX_NEXT_ACTION_LENGTH });
-  const recentActivity = normalizeActivityLog(safeData.activityLog).slice(0, 3);
-  const overview = buildScheduleOverview({
+  const summary = cachedSummary || buildScheduleSummaryPayload({
     data: safeData,
     updatedAt: row?.updated_at ?? row?.updatedAt,
     status,
@@ -1235,10 +1321,10 @@ const scheduleRowToSummary = (row, pathById) => {
     id: String(row?.id || '').trim(),
     name: String(row?.name || '').trim(),
     status,
-    holdingReason,
-    nextAction,
-    recentActivity,
-    overview,
+    holdingReason: summary.holdingReason,
+    nextAction: summary.nextAction,
+    recentActivity: summary.recentActivity.slice(0, 3),
+    overview: summary.overview,
     tasksCount: Number(row?.tasks_count ?? row?.tasksCount ?? 0) || 0,
     vacationsCount: Number(row?.vacations_count ?? row?.vacationsCount ?? 0) || 0,
     folderId,
@@ -1255,10 +1341,17 @@ const scheduleRowToDetail = (row, pathById, request) => {
   const parsedData = parseJsonSafe(String(row?.data || ''));
   const rawData = parsedData ?? row?.data ?? null;
   const status = normalizeScheduleStatus(row?.status ?? rawData?.status);
-  const holdingReason = normalizeShortText(rawData?.holdingReason, { maxLength: MAX_HOLDING_REASON_LENGTH });
-  const nextAction = normalizeShortText(rawData?.nextAction, { maxLength: MAX_NEXT_ACTION_LENGTH });
+  const cachedSummary = readScheduleSummaryFromRow(row);
+  const holdingReason = normalizeShortText(
+    rawData?.holdingReason ?? cachedSummary?.holdingReason ?? '',
+    { maxLength: MAX_HOLDING_REASON_LENGTH },
+  );
+  const nextAction = normalizeShortText(
+    rawData?.nextAction ?? cachedSummary?.nextAction ?? '',
+    { maxLength: MAX_NEXT_ACTION_LENGTH },
+  );
   const activityLog = normalizeActivityLog(rawData?.activityLog);
-  const overview = buildScheduleOverview({
+  const overview = cachedSummary?.overview || buildScheduleOverview({
     data: rawData,
     updatedAt: row?.updated_at ?? row?.updatedAt,
     status,
@@ -1626,13 +1719,12 @@ const handleListSchedules = async (request, env) => {
   const { DB } = env;
   const url = getRequestUrl(request);
   const sharedScheduleId = getSharedScheduleId(env);
-  const folderContext = await buildFolderContext(DB);
 
   if (sharedScheduleId) {
 	    const row = await DB
 	      .prepare(
 	        [
-	          'SELECT id, name, data, status, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at',
+	          `SELECT id, name, status, tasks_count, vacations_count, folder_id, ${SCHEDULE_SUMMARY_SELECT_SQL}, created_by_email, updated_by_email, created_at, updated_at`,
 	          'FROM schedules',
 	          'WHERE id = ?',
 	          'LIMIT 1',
@@ -1643,17 +1735,18 @@ const handleListSchedules = async (request, env) => {
 
     const offset = Math.max(0, toInt(url.searchParams.get('offset'), 0));
     if (offset > 0 || !row) return jsonResponse([]);
-    return jsonResponse([scheduleRowToSummary(row, folderContext.pathById)]);
+    return jsonResponse([scheduleRowToSummary(row, new Map())]);
   }
 
   const query = String(url.searchParams.get('q') || '').trim();
   const limit = clamp(toInt(url.searchParams.get('limit'), 40), 1, 200);
-  const offset = Math.max(0, toInt(url.searchParams.get('offset'), 0));
+  const offset = clamp(Math.max(0, toInt(url.searchParams.get('offset'), 0)), 0, MAX_LIST_OFFSET);
   const requestedFolderId = normalizeFolderId(url.searchParams.get('folderId'));
   const includeDescendants = parseBoolean(url.searchParams.get('includeDescendants'), true);
 
   const whereParts = [];
   const bindings = [];
+  let folderContext = null;
 
   if (query) {
     whereParts.push('name LIKE ?');
@@ -1664,6 +1757,7 @@ const handleListSchedules = async (request, env) => {
     if (requestedFolderId == null) {
       whereParts.push('folder_id IS NULL');
     } else if (includeDescendants) {
+      folderContext = await buildFolderContext(DB);
       const ids = collectDescendantFolderIds(requestedFolderId, folderContext.childrenByParent);
       if (ids.length > 0) {
         whereParts.push(`folder_id IN (${ids.map(() => '?').join(',')})`);
@@ -1678,7 +1772,7 @@ const handleListSchedules = async (request, env) => {
   }
 
 	  const sqlParts = [
-	    'SELECT id, name, data, status, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at',
+	    `SELECT id, name, status, tasks_count, vacations_count, folder_id, ${SCHEDULE_SUMMARY_SELECT_SQL}, created_by_email, updated_by_email, created_at, updated_at`,
 	    'FROM schedules',
 	  ];
   if (whereParts.length > 0) {
@@ -1691,7 +1785,7 @@ const handleListSchedules = async (request, env) => {
   const result = await DB.prepare(sqlParts.join(' ')).bind(...bindings).all();
   const rows = parseD1Rows(result);
 
-  return jsonResponse(rows.map((row) => scheduleRowToSummary(row, folderContext.pathById)));
+  return jsonResponse(rows.map((row) => scheduleRowToSummary(row, new Map())));
 };
 
 const handleGetSchedule = async (request, env, id) => {
@@ -1714,8 +1808,10 @@ const handleGetSchedule = async (request, env, id) => {
 
   if (!row) return errorResponse('Schedule not found.', { status: 404 });
 
-  const folderContext = await buildFolderContext(env.DB);
-  return jsonResponse(scheduleRowToDetail(row, folderContext.pathById, request));
+  const pathById = new Map();
+  const folderId = normalizeFolderId(row?.folder_id ?? row?.folderId);
+  if (folderId) pathById.set(folderId, await resolveFolderPath(env.DB, folderId));
+  return jsonResponse(scheduleRowToDetail(row, pathById, request));
 };
 
 const handleCreateSchedule = async (request, env) => {
@@ -1761,12 +1857,14 @@ const handleCreateSchedule = async (request, env) => {
 	      at: timestamp,
 	    }),
 	  );
+  const summary = buildScheduleSummaryPayload({ data: parsed.data, updatedAt: timestamp, status: parsed.status });
+  const encodedSummary = encodeScheduleSummaryPayload(summary);
 
 		  const runResult = await env.DB
 	    .prepare(
 	      [
-	        'INSERT INTO schedules (id, name, data, status, tasks_count, vacations_count, folder_id, created_by_email, updated_by_email, created_at, updated_at)',
-	        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+	        'INSERT INTO schedules (id, name, data, status, tasks_count, vacations_count, folder_id, holding_reason, next_action, recent_activity_json, overview_json, created_by_email, updated_by_email, created_at, updated_at)',
+	        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
 	      ].join(' '),
 	    )
 	    .bind(
@@ -1777,6 +1875,10 @@ const handleCreateSchedule = async (request, env) => {
 	      parsed.tasks.length,
 	      parsed.vacations.length,
 	      parsed.folderId,
+        encodedSummary.holdingReason,
+        encodedSummary.nextAction,
+        encodedSummary.recentActivityJson,
+        encodedSummary.overviewJson,
       createdByEmail,
       updatedByEmail,
       timestamp,
@@ -1788,9 +1890,7 @@ const handleCreateSchedule = async (request, env) => {
     return errorResponse('Failed to create schedule.', { status: 500 });
   }
 
-	  const folderContext = await buildFolderContext(env.DB);
-	  const overview = buildScheduleOverview({ data: parsed.data, updatedAt: timestamp, status: parsed.status });
-	  const recentActivity = normalizeActivityLog(parsed.data.activityLog).slice(0, 3);
+  const folderPath = await resolveFolderPath(env.DB, parsed.folderId);
 	  return jsonResponse(
 	    {
 	      id,
@@ -1803,10 +1903,10 @@ const handleCreateSchedule = async (request, env) => {
 		      status: parsed.status,
 		      holdingReason: parsed.holdingReason,
 		      nextAction: parsed.nextAction,
-		      recentActivity,
-		      overview,
+		      recentActivity: summary.recentActivity.slice(0, 3),
+		      overview: summary.overview,
 		      folderId: parsed.folderId,
-		      folderPath: parsed.folderId ? String(folderContext.pathById.get(parsed.folderId) || '') : '',
+		      folderPath,
 		      createdByEmail,
       updatedByEmail,
     },
@@ -1884,12 +1984,14 @@ const handleUpdateSchedule = async (request, env, id) => {
 	      at: timestamp,
 	    }),
 	  );
+  const summary = buildScheduleSummaryPayload({ data: parsed.data, updatedAt: timestamp, status: parsed.status });
+  const encodedSummary = encodeScheduleSummaryPayload(summary);
 
 		  const runResult = await env.DB
 	    .prepare(
 	      [
 	        'UPDATE schedules',
-	        'SET name = ?, data = ?, status = ?, tasks_count = ?, vacations_count = ?, folder_id = ?, created_by_email = ?, updated_by_email = ?, updated_at = ?',
+	        'SET name = ?, data = ?, status = ?, tasks_count = ?, vacations_count = ?, folder_id = ?, holding_reason = ?, next_action = ?, recent_activity_json = ?, overview_json = ?, created_by_email = ?, updated_by_email = ?, updated_at = ?',
 	        'WHERE id = ?',
 	      ].join(' '),
 	    )
@@ -1900,6 +2002,10 @@ const handleUpdateSchedule = async (request, env, id) => {
 	      parsed.tasks.length,
 	      parsed.vacations.length,
 	      parsed.folderId,
+        encodedSummary.holdingReason,
+        encodedSummary.nextAction,
+        encodedSummary.recentActivityJson,
+        encodedSummary.overviewJson,
       createdByEmail,
       updatedByEmail,
       timestamp,
@@ -1911,9 +2017,7 @@ const handleUpdateSchedule = async (request, env, id) => {
 	    return errorResponse('Failed to update schedule.', { status: 500 });
 	  }
 
-	  const folderContext = await buildFolderContext(env.DB);
-	  const overview = buildScheduleOverview({ data: parsed.data, updatedAt: timestamp, status: parsed.status });
-	  const recentActivity = normalizeActivityLog(parsed.data.activityLog).slice(0, 3);
+  const folderPath = await resolveFolderPath(env.DB, parsed.folderId);
 	  return jsonResponse({
 	    id,
 	    name: parsed.name,
@@ -1922,12 +2026,12 @@ const handleUpdateSchedule = async (request, env, id) => {
 		    status: parsed.status,
 		    holdingReason: parsed.holdingReason,
 		    nextAction: parsed.nextAction,
-		    recentActivity,
-		    overview,
+		    recentActivity: summary.recentActivity.slice(0, 3),
+		    overview: summary.overview,
 		    tasksCount: parsed.tasks.length,
 		    vacationsCount: parsed.vacations.length,
     folderId: parsed.folderId,
-    folderPath: parsed.folderId ? String(folderContext.pathById.get(parsed.folderId) || '') : '',
+    folderPath,
     createdByEmail,
     updatedByEmail,
   });
@@ -1981,67 +2085,80 @@ const handlePatchScheduleFolder = async (request, env, id) => {
 
   const folderId = normalizeFolderId(bodyResult.payload.folderId);
 
-	  const schedule = await env.DB
-	    .prepare('SELECT id, data, status, folder_id, updated_by_email FROM schedules WHERE id = ? LIMIT 1')
-	    .bind(id)
-	    .first();
-	  if (!schedule) return errorResponse('Schedule not found.', { status: 404 });
+  const schedule = await env.DB
+    .prepare('SELECT id, data, status, folder_id, updated_by_email FROM schedules WHERE id = ? LIMIT 1')
+    .bind(id)
+    .first();
+  if (!schedule) return errorResponse('Schedule not found.', { status: 404 });
 
   if (folderId != null) {
     const folderExists = await ensureFolderExists(env.DB, folderId);
     if (!folderExists) return errorResponse('folderId does not exist.', { status: 400 });
   }
 
-	  const timestamp = nowMs();
-	  const actorEmail = normalizeEmail(auth.user?.email);
-	  const existingData = parseJsonSafe(String(schedule?.data || ''));
-	  const nextData = isPlainObject(existingData)
-	    ? {
-	        ...existingData,
-	        folderId,
-	        updatedByEmail: actorEmail || normalizeEmail(schedule?.updated_by_email ?? schedule?.updatedByEmail),
-	        updatedAt: timestamp,
-	      }
-	    : {
-	        folderId,
-	        status: normalizeScheduleStatus(schedule?.status),
-	        updatedByEmail: actorEmail,
-	        updatedAt: timestamp,
-	        activityLog: [],
-	      };
-	  const folderContextBefore = await buildFolderContext(env.DB);
-	  const previousFolderId = normalizeFolderId(schedule?.folder_id ?? schedule?.folderId);
-	  const previousFolderPath = previousFolderId ? String(folderContextBefore.pathById.get(previousFolderId) || '') : '미분류';
-	  const nextFolderPath = folderId ? String(folderContextBefore.pathById.get(folderId) || '') : '미분류';
-	  nextData.activityLog = appendActivityEntries(
-	    nextData.activityLog,
-	    [
-	      createActivityEntry({
-	        type: 'folder',
-	        actorEmail,
-	        at: timestamp,
+  const timestamp = nowMs();
+  const actorEmail = normalizeEmail(auth.user?.email);
+  const existingData = parseJsonSafe(String(schedule?.data || ''));
+  const nextData = isPlainObject(existingData)
+    ? {
+        ...existingData,
+        folderId,
+        updatedByEmail: actorEmail || normalizeEmail(schedule?.updated_by_email ?? schedule?.updatedByEmail),
+        updatedAt: timestamp,
+      }
+    : {
+        folderId,
+        status: normalizeScheduleStatus(schedule?.status),
+        updatedByEmail: actorEmail,
+        updatedAt: timestamp,
+        activityLog: [],
+      };
+  const previousFolderId = normalizeFolderId(schedule?.folder_id ?? schedule?.folderId);
+  const previousFolderPath = previousFolderId ? await resolveFolderPath(env.DB, previousFolderId) : '미분류';
+  const nextFolderPath = folderId ? await resolveFolderPath(env.DB, folderId) : '미분류';
+  nextData.activityLog = appendActivityEntries(
+    nextData.activityLog,
+    [
+      createActivityEntry({
+        type: 'folder',
+        actorEmail,
+        at: timestamp,
 	        message: `폴더 이동: ${previousFolderPath || '미분류'} -> ${nextFolderPath || '미분류'}`,
 	      }),
 	    ],
 	  );
-	  const runResult = await env.DB
-	    .prepare('UPDATE schedules SET data = ?, folder_id = ?, updated_by_email = ?, updated_at = ? WHERE id = ?')
-	    .bind(JSON.stringify(nextData), folderId, actorEmail, timestamp, id)
-	    .run();
+  const summary = buildScheduleSummaryPayload({
+    data: nextData,
+    updatedAt: timestamp,
+    status: schedule?.status,
+  });
+  const encodedSummary = encodeScheduleSummaryPayload(summary);
+  const runResult = await env.DB
+    .prepare('UPDATE schedules SET data = ?, folder_id = ?, holding_reason = ?, next_action = ?, recent_activity_json = ?, overview_json = ?, updated_by_email = ?, updated_at = ? WHERE id = ?')
+    .bind(
+      JSON.stringify(nextData),
+      folderId,
+      encodedSummary.holdingReason,
+      encodedSummary.nextAction,
+      encodedSummary.recentActivityJson,
+      encodedSummary.overviewJson,
+      actorEmail,
+      timestamp,
+      id,
+    )
+    .run();
 
   if (!runResult?.success) return errorResponse('Failed to update schedule folder.', { status: 500 });
 
-	  const folderContext = await buildFolderContext(env.DB);
-	  const overview = buildScheduleOverview({ data: nextData, updatedAt: timestamp, status: schedule?.status });
-	  return jsonResponse({
-	    id,
-	    folderId,
-	    folderPath: folderId ? String(folderContext.pathById.get(folderId) || '') : '',
-	    updatedAt: timestamp,
-	    updatedByEmail: actorEmail,
-	    recentActivity: normalizeActivityLog(nextData.activityLog).slice(0, 3),
-	    overview,
-	  });
+  return jsonResponse({
+    id,
+    folderId,
+    folderPath: nextFolderPath,
+    updatedAt: timestamp,
+    updatedByEmail: actorEmail,
+    recentActivity: summary.recentActivity.slice(0, 3),
+    overview: summary.overview,
+  });
 	};
 
 const handlePatchFolderOrder = async (request, env, folderId) => {
@@ -2073,14 +2190,14 @@ const handlePatchFolderOrder = async (request, env, folderId) => {
 
   const targetIndex = currentIndex + (direction === 'up' ? -1 : 1);
   if (targetIndex < 0 || targetIndex >= siblings.length) {
-    const folderContext = await buildFolderContext(env.DB);
+    const path = await resolveFolderPath(env.DB, folderId);
     return jsonResponse({
       ok: true,
       moved: false,
       id: folderId,
       parentId,
       sortOrder: Number(siblings[currentIndex]?.sortOrder) || currentIndex + 1,
-      path: String(folderContext.pathById.get(folderId) || currentFolder?.name || folderId),
+      path: path || currentFolder?.name || folderId,
     });
   }
 
@@ -2094,14 +2211,14 @@ const handlePatchFolderOrder = async (request, env, folderId) => {
   });
   await resequenceSiblingFolders(env.DB, reordered, timestamp);
 
-  const folderContext = await buildFolderContext(env.DB);
+  const path = await resolveFolderPath(env.DB, folderId);
   return jsonResponse({
     ok: true,
     moved: true,
     id: folderId,
     parentId,
     sortOrder: targetIndex + 1,
-    path: String(folderContext.pathById.get(folderId) || currentFolder?.name || folderId),
+    path: path || currentFolder?.name || folderId,
     updatedAt: timestamp,
   });
 };

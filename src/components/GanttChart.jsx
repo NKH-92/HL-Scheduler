@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatDate, getDaysDiff, getKoreanDay, getWeekNumber, toDate, toUtcMidnightMs } from '../utils/dates';
 import { GANTT_EXPORT_LEFT_PANE_PX, GANTT_LEFT_PANE_COMPACT_PX, GANTT_LEFT_PANE_PX } from '../utils/ganttLayout';
 
+const ROW_VIRTUALIZATION_THRESHOLD = 48;
+const INITIAL_VIRTUAL_ROW_COUNT = 50;
+const COL_VIRTUALIZATION_THRESHOLD = 120;
+
 function GanttChart({
   tasks,
   vacations = [],
@@ -22,22 +26,30 @@ function GanttChart({
       return toDate(value);
     };
 
-    const validDates = [
-      ...tasks.flatMap((t) => [getValidDate(t.start), getValidDate(t.end || t.start)].filter(Boolean)),
-      ...vacations.flatMap((v) => [getValidDate(v.start), getValidDate(v.end || v.start)].filter(Boolean)),
-    ];
-
     let min = null;
     let max = null;
-    if (validDates.length === 0) {
+    const registerDate = (value) => {
+      const date = getValidDate(value);
+      if (!date) return;
+      if (min == null || date < min) min = new Date(date);
+      if (max == null || date > max) max = new Date(date);
+    };
+
+    tasks.forEach((task) => {
+      registerDate(task?.start);
+      registerDate(task?.end || task?.start);
+    });
+    vacations.forEach((vacation) => {
+      registerDate(vacation?.start);
+      registerDate(vacation?.end || vacation?.start);
+    });
+
+    if (min == null || max == null) {
       const now = new Date();
       min = new Date(now);
       min.setMonth(min.getMonth() - 1);
       max = new Date(now);
       max.setMonth(max.getMonth() + 1);
-    } else {
-      min = new Date(Math.min(...validDates));
-      max = new Date(Math.max(...validDates));
     }
 
     if (viewMode === 'Week') {
@@ -76,11 +88,11 @@ function GanttChart({
   const [viewportRect, setViewportRect] = useState({ width: 0, height: 0 });
   const [rowWindow, setRowWindow] = useState(() => ({
     start: 0,
-    end: tasks.length > 80 ? Math.min(tasks.length, 50) : tasks.length,
+    end: tasks.length > ROW_VIRTUALIZATION_THRESHOLD ? Math.min(tasks.length, INITIAL_VIRTUAL_ROW_COUNT) : tasks.length,
   }));
   const [colWindow, setColWindow] = useState(() => ({
     start: 0,
-    end: totalDays > 120 ? Math.min(totalDays, 200) : totalDays,
+    end: totalDays > COL_VIRTUALIZATION_THRESHOLD ? Math.min(totalDays, 200) : totalDays,
   }));
   const dragInfoRef = useRef(null);
   const dragCleanupRef = useRef(null);
@@ -272,7 +284,7 @@ function GanttChart({
     if (isExportMode) return;
 
     const rowCount = tasks.length;
-    const enableRowVirtualization = rowCount > 80 && clientHeight > 0;
+    const enableRowVirtualization = rowCount > ROW_VIRTUALIZATION_THRESHOLD && clientHeight > 0;
 
     if (enableRowVirtualization) {
       const overscanRows = 8;
@@ -287,7 +299,7 @@ function GanttChart({
     }
 
     const enableColVirtualization =
-      !fitEnabled && totalDays > 120 && clientWidth > 0 && Number.isFinite(colWidth) && colWidth > 0;
+      !fitEnabled && totalDays > COL_VIRTUALIZATION_THRESHOLD && clientWidth > 0 && Number.isFinite(colWidth) && colWidth > 0;
 
     if (enableColVirtualization) {
       const overscanCols = Math.ceil(800 / colWidth);
@@ -401,7 +413,7 @@ function GanttChart({
   const chartWidth = totalDays * colWidth;
 
   const rowCount = tasks.length;
-  const enableRowVirtualization = !isExportMode && rowCount > 80;
+  const enableRowVirtualization = !isExportMode && rowCount > ROW_VIRTUALIZATION_THRESHOLD;
   const rowStart = enableRowVirtualization ? Math.max(0, Math.min(rowCount, rowWindow.start)) : 0;
   const rowEnd = enableRowVirtualization ? Math.max(rowStart, Math.min(rowCount, rowWindow.end)) : rowCount;
   const visibleTasks = enableRowVirtualization ? tasks.slice(rowStart, rowEnd) : tasks;
@@ -409,7 +421,7 @@ function GanttChart({
   const rowBottomSpacerPx = enableRowVirtualization ? (rowCount - rowEnd) * ROW_HEIGHT_PX : 0;
 
   const enableColVirtualization =
-    !isExportMode && !fitEnabled && totalDays > 120 && Number.isFinite(colWidth) && colWidth > 0;
+    !isExportMode && !fitEnabled && totalDays > COL_VIRTUALIZATION_THRESHOLD && Number.isFinite(colWidth) && colWidth > 0;
   const colStart = enableColVirtualization ? Math.max(0, Math.min(totalDays, colWindow.start)) : 0;
   const colEnd = enableColVirtualization ? Math.max(colStart, Math.min(totalDays, colWindow.end)) : totalDays;
   const todayUtcMs = toUtcMidnightMs(new Date());
@@ -664,6 +676,12 @@ function GanttChart({
       const duration = getDaysDiff(s, e) + 1;
       if (Number.isNaN(offset) || Number.isNaN(duration) || duration <= 0) return;
 
+      const visibleStart = enableColVirtualization ? colStart : 0;
+      const visibleEnd = enableColVirtualization ? colEnd : totalDays;
+      const clippedStart = Math.max(offset, visibleStart);
+      const clippedEnd = Math.min(offset + duration, visibleEnd);
+      if (clippedEnd <= clippedStart) return;
+
       const startUtc = toUtc(s);
       const endUtc = toUtc(e);
       const minUtc = startUtc !== null && endUtc !== null ? Math.min(startUtc, endUtc) : null;
@@ -674,8 +692,8 @@ function GanttChart({
       const labelTopPx = overlapsToday ? 24 + todayOverlapIndex * 18 : 4;
       if (overlapsToday) todayOverlapIndex += 1;
 
-      const left = offset * colWidth;
-      const width = duration * colWidth;
+      const left = clippedStart * colWidth;
+      const width = (clippedEnd - clippedStart) * colWidth;
       overlays.push(
         <div
           key={v.id}
