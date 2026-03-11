@@ -1,4 +1,5 @@
 import { normalizeTasks, normalizeVacations } from '../utils/data';
+import { requestJson as requestApiJson, trimTrailingSlashes } from '../utils/apiClient';
 import {
   PublicSchedulesApiError,
   getPublicSchedule,
@@ -6,8 +7,6 @@ import {
   getPublicSchedulesAuthToken,
   getPublicSchedulesWriteApiBase,
 } from '../utils/publicSchedulesApi';
-
-const trimTrailingSlashes = (value) => String(value || '').replace(/\/+$/, '');
 
 export const getCollabApiBase = () => {
   const writeBase = trimTrailingSlashes(getPublicSchedulesWriteApiBase());
@@ -29,25 +28,6 @@ const buildCollabUrl = (path) => {
   return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
 };
 
-const readJsonBody = async (res) => {
-  const text = await res.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-};
-
-const extractErrorMessage = (data, status) => {
-  if (data && typeof data === 'object') {
-    const message = data.error || data.message;
-    if (message) return String(message);
-  }
-  if (typeof data === 'string' && data.trim()) return data.trim();
-  return `요청에 실패했습니다 (${status}).`;
-};
-
 const requestCollabJson = async (
   path,
   {
@@ -62,42 +42,26 @@ const requestCollabJson = async (
 ) => {
   const safeMethod = String(method || 'GET').toUpperCase();
   const isWriteRequest = safeMethod !== 'GET' && safeMethod !== 'HEAD';
-  const token = getPublicSchedulesAuthToken();
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), Math.max(5000, Number(timeoutMs) || 15000));
 
   try {
-    const res = await fetch(buildCollabUrl(path), {
+    return await requestApiJson({
+      buildUrl: buildCollabUrl,
+      path,
       method: safeMethod,
-      body: body == null ? undefined : JSON.stringify(body),
+      body,
+      timeoutMs,
       credentials,
-      signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-        ...(body == null ? null : { 'Content-Type': 'application/json' }),
-        ...((requiresAuth || isWriteRequest) && token ? { Authorization: `Bearer ${token}` } : null),
-        ...(headers || null),
-      },
+      headers,
+      authToken: getPublicSchedulesAuthToken(),
+      attachAuthToken: requiresAuth || isWriteRequest,
+      authErrorMessage: suppressAuthErrorMessage ? '' : '로그인한 계정으로 다시 시도해주세요.',
     });
-
-    const data = await readJsonBody(res);
-    if (!res.ok) {
-      const isAuthDenied = res.status === 401 || res.status === 403;
-      const message =
-        isAuthDenied && !suppressAuthErrorMessage
-          ? '승인된 계정으로 로그인한 뒤 다시 시도하세요.'
-          : extractErrorMessage(data, res.status);
-      throw new PublicSchedulesApiError(message, { status: res.status, details: data });
-    }
-    return data;
   } catch (error) {
-    if (error?.name === 'AbortError') {
-      throw new PublicSchedulesApiError('요청 시간이 초과되었습니다.', { status: 0 });
-    }
     if (error instanceof PublicSchedulesApiError) throw error;
-    throw new PublicSchedulesApiError('네트워크 오류가 발생했습니다.', { status: 0, details: error?.message || String(error) });
-  } finally {
-    window.clearTimeout(timer);
+    throw new PublicSchedulesApiError(error?.message || 'Request failed.', {
+      status: Number(error?.status) || 0,
+      details: error?.details ?? error?.message ?? String(error),
+    });
   }
 };
 

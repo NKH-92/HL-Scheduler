@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatDate, getDaysDiff, getKoreanDay, getWeekNumber, toDate, toUtcMidnightMs } from '../utils/dates';
 import { GANTT_EXPORT_LEFT_PANE_PX, GANTT_LEFT_PANE_COMPACT_PX, GANTT_LEFT_PANE_PX } from '../utils/ganttLayout';
 
@@ -264,23 +264,7 @@ function GanttChart({
     window.addEventListener('pointercancel', finishDrag);
   };
 
-  const syncLeftScroll = () => {
-    if (isExportMode) return;
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const leftRows = leftRowsRef.current;
-    const todayOverlay = todayOverlayRef.current;
-    const y = viewport.scrollTop || 0;
-    const x = viewport.scrollLeft || 0;
-    if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
-    scrollRafRef.current = requestAnimationFrame(() => {
-      if (leftRows) leftRows.style.transform = `translateY(-${y}px)`;
-      if (todayOverlay) todayOverlay.style.transform = `translateX(-${x}px)`;
-      updateVirtualWindows(y, x, viewport.clientHeight || 0, viewport.clientWidth || 0);
-    });
-  };
-
-  const updateVirtualWindows = (scrollTop, scrollLeft, clientHeight, clientWidth) => {
+  const updateVirtualWindows = useCallback((scrollTop, scrollLeft, clientHeight, clientWidth) => {
     if (isExportMode) return;
 
     const rowCount = tasks.length;
@@ -309,7 +293,23 @@ function GanttChart({
     } else {
       setColWindow((prev) => (prev.start === 0 && prev.end === totalDays ? prev : { start: 0, end: totalDays }));
     }
-  };
+  }, [HEADER_HEIGHT_PX, ROW_HEIGHT_PX, colWidth, fitEnabled, isExportMode, tasks.length, totalDays]);
+
+  const syncLeftScroll = useCallback(() => {
+    if (isExportMode) return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const leftRows = leftRowsRef.current;
+    const todayOverlay = todayOverlayRef.current;
+    const y = viewport.scrollTop || 0;
+    const x = viewport.scrollLeft || 0;
+    if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+    scrollRafRef.current = requestAnimationFrame(() => {
+      if (leftRows) leftRows.style.transform = `translateY(-${y}px)`;
+      if (todayOverlay) todayOverlay.style.transform = `translateX(-${x}px)`;
+      updateVirtualWindows(y, x, viewport.clientHeight || 0, viewport.clientWidth || 0);
+    });
+  }, [isExportMode, updateVirtualWindows]);
 
   useEffect(() => {
     if (isExportMode) return;
@@ -335,14 +335,14 @@ function GanttChart({
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
     };
   }, [
-    isExportMode,
     fitEnabled,
-    viewMode,
+    syncLeftScroll,
     tasks.length,
     totalDays,
-    zoom,
-    viewportRect.width,
+    viewMode,
     viewportRect.height,
+    viewportRect.width,
+    zoom,
   ]);
 
   useEffect(() => {
@@ -433,7 +433,7 @@ function GanttChart({
     isCompactMode ? 'text-[9px]' : 'text-[10px]'
   }`;
 
-  const renderTopHeader = () => {
+  const renderTopHeader = useCallback(() => {
     const topHeaders = [];
 
     if (viewMode === 'Day' || viewMode === 'Week') {
@@ -484,9 +484,9 @@ function GanttChart({
       tempDate = new Date(checkDate);
     }
     return topHeaders;
-  };
+  }, [colWidth, minDate, topHeaderClass, totalDays, viewMode]);
 
-  const renderBottomHeader = () => {
+  const renderBottomHeader = useCallback(() => {
     const bottomHeaders = [];
 
     if (viewMode === 'Day') {
@@ -596,9 +596,9 @@ function GanttChart({
     }
 
     return bottomHeaders;
-  };
+  }, [bottomHeaderBase, colEnd, colStart, colWidth, minDate, totalDays, viewMode]);
 
-  const renderGridBackground = () => {
+  const renderGridBackground = useCallback(() => {
     const grids = [];
     let d = new Date(minDate);
     d.setDate(d.getDate() + colStart);
@@ -653,9 +653,9 @@ function GanttChart({
     }
 
     return grids;
-  };
+  }, [colEnd, colStart, colWidth, minDate, totalDays, viewMode]);
 
-  const renderVacationOverlays = () => {
+  const renderVacationOverlays = useCallback(() => {
     const overlays = [];
 
     const toUtc = (value) => {
@@ -711,7 +711,7 @@ function GanttChart({
       );
     });
     return overlays;
-  };
+  }, [colEnd, colStart, colWidth, enableColVirtualization, minDate, totalDays, vacations]);
 
   const renderTodayOverlay = () => {
     const today = new Date();
@@ -746,22 +746,13 @@ function GanttChart({
     );
   };
 
-  const topHeaderEl = useMemo(() => renderTopHeader(), [viewMode, totalDays, colWidth, minDate.getTime(), topHeaderClass]);
+  const topHeaderEl = useMemo(() => renderTopHeader(), [renderTopHeader]);
 
-  const bottomHeaderEl = useMemo(
-    () => renderBottomHeader(),
-    [viewMode, totalDays, colWidth, minDate.getTime(), colStart, colEnd, bottomHeaderBase],
-  );
+  const bottomHeaderEl = useMemo(() => renderBottomHeader(), [renderBottomHeader]);
 
-  const gridBackgroundEl = useMemo(
-    () => renderGridBackground(),
-    [viewMode, totalDays, colWidth, minDate.getTime(), colStart, colEnd],
-  );
+  const gridBackgroundEl = useMemo(() => renderGridBackground(), [renderGridBackground]);
 
-  const vacationOverlaysEl = useMemo(
-    () => renderVacationOverlays(),
-    [vacations, colWidth, minDate.getTime()],
-  );
+  const vacationOverlaysEl = useMemo(() => renderVacationOverlays(), [renderVacationOverlays]);
 
   const containerClass = isExportMode
     ? 'bg-white border border-slate-200 flex min-w-0 flex-col'

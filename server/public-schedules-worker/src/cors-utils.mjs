@@ -31,7 +31,7 @@ export const resolveAllowedOrigin = (requestOrigin, env = {}) => {
   if (!origin) return null;
 
   const allowedOrigins = getAllowedOrigins(env);
-  if (allowedOrigins.includes('*')) return origin;
+  if (allowedOrigins.includes('*')) return '*';
 
   const normalized = normalizeOrigin(origin);
   return allowedOrigins.includes(normalized) ? origin : null;

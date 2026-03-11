@@ -9,7 +9,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "lint": "eslint .",
+    "check:syntax": "node --check server/public-schedules-worker/src/worker.mjs && node --check server/public-schedules-worker/src/collab-api.mjs && node --check server/public-schedules-worker/src/worker-router.mjs && node --check server/public-schedules-worker/src/collab-router.mjs",
     "test": "node --experimental-specifier-resolution=node scripts/sanity-check.mjs",
+    "check": "npm run lint && npm run check:syntax && npm run test && npm run build",
     "test:collab": "node --experimental-specifier-resolution=node scripts/collab-sanity-check.mjs",
     "cf:build:public": "node scripts/cloudflare/build-pages.mjs --role public",
     "cf:build:admin": "node scripts/cloudflare/build-pages.mjs --role admin",
@@ -25,8 +28,12 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@vitejs/plugin-react": "^5.1.3",
     "autoprefixer": "^10.4.20",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^17.4.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "vite": "^7.3.1"

@@ -1,4 +1,4 @@
-const trimTrailingSlashes = (value) => String(value || '').replace(/\/+$/, '');
+import { ApiClientError, requestJson as requestApiJson, trimTrailingSlashes } from './apiClient';
 const normalizeRole = (value) => (String(value || '').trim().toLowerCase() === 'admin' ? 'admin' : 'public');
 
 const WRITE_AUTH_ERROR_MESSAGE = '쓰기 권한이 없습니다. 승인된 계정으로 로그인하세요.';
@@ -42,12 +42,10 @@ export const setPublicSchedulesAuthToken = (token) => {
   authToken = String(token || '').trim();
 };
 
-class PublicSchedulesApiError extends Error {
-  constructor(message, { status, details } = {}) {
-    super(message);
+class PublicSchedulesApiError extends ApiClientError {
+  constructor(message, options = {}) {
+    super(message, options);
     this.name = 'PublicSchedulesApiError';
-    this.status = status;
-    this.details = details;
   }
 }
 
@@ -75,25 +73,6 @@ const buildApiUrl = (path, { api = 'read' } = {}) => {
   return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
 };
 
-const readJsonBody = async (res) => {
-  const text = await res.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-};
-
-const extractResponseErrorMessage = (data, status) => {
-  if (data && typeof data === 'object') {
-    const message = data.error || data.message;
-    if (message) return String(message);
-  }
-  if (typeof data === 'string' && data.trim()) return data.trim();
-  return `요청에 실패했습니다 (${status}).`;
-};
-
 const requestJson = async (
   path,
   { timeoutMs = 15000, api = 'read', requiresAuth = false, suppressAuthErrorMessage = false, ...options } = {},
@@ -103,48 +82,31 @@ const requestJson = async (
   const needsCredentials = api === 'auth' || api === 'admin' || isWriteRequest;
   const token = getPublicSchedulesAuthToken();
 
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), Math.max(5000, Number(timeoutMs) || 15000));
-
   try {
-    const headers = {
-      Accept: 'application/json',
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(options.headers || {}),
-      ...((requiresAuth || isWriteRequest) && token ? { Authorization: `Bearer ${token}` } : {}),
-    };
-
-    const res = await fetch(buildApiUrl(path, { api }), {
-      ...options,
+    return await requestApiJson({
+      buildUrl: (nextPath) => buildApiUrl(nextPath, { api }),
+      path,
+      method,
+      body: options.body,
+      timeoutMs,
       credentials: options.credentials ?? (needsCredentials ? 'include' : 'same-origin'),
-      headers,
-      signal: controller.signal,
+      headers: options.headers,
+      authToken: token,
+      attachAuthToken: requiresAuth || isWriteRequest,
+      authErrorMessage:
+        api === 'admin'
+          ? ADMIN_AUTH_ERROR_MESSAGE
+          : isWriteRequest
+            ? WRITE_AUTH_ERROR_MESSAGE
+            : '',
+      suppressAuthErrorMessage,
     });
-
-    const data = await readJsonBody(res);
-    if (!res.ok) {
-      const isAuthDenied = res.status === 401 || res.status === 403;
-      const message =
-        isAuthDenied && !suppressAuthErrorMessage
-          ? api === 'admin'
-            ? ADMIN_AUTH_ERROR_MESSAGE
-            : isWriteRequest
-              ? WRITE_AUTH_ERROR_MESSAGE
-              : extractResponseErrorMessage(data, res.status)
-          : extractResponseErrorMessage(data, res.status);
-
-      throw new PublicSchedulesApiError(String(message), { status: res.status, details: data });
-    }
-
-    return data;
   } catch (error) {
-    if (error?.name === 'AbortError') {
-      throw new PublicSchedulesApiError('요청 시간이 초과되었습니다.', { status: 0 });
-    }
     if (error instanceof PublicSchedulesApiError) throw error;
-    throw new PublicSchedulesApiError('네트워크 오류가 발생했습니다.', { status: 0, details: error?.message || String(error) });
-  } finally {
-    window.clearTimeout(timer);
+    throw new PublicSchedulesApiError(error?.message || 'Request failed.', {
+      status: Number(error?.status) || 0,
+      details: error?.details ?? error?.message ?? String(error),
+    });
   }
 };
 

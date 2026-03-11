@@ -7,6 +7,7 @@ import {
   normalizeDateYmd,
   rollupCardSummary,
 } from './collab-model.mjs';
+import { routeCollabRequest } from './collab-router.mjs';
 import { sanitizeShareSnapshot } from './share-snapshot.mjs';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -898,6 +899,30 @@ const buildShareSnapshotPayload = async (db, shareLink) => {
   };
 };
 
+const getEventBoardId = (event) => {
+  const directBoardId = trim(event?.boardId);
+  if (directBoardId) return directBoardId;
+
+  const payload = event?.payload;
+  return (
+    trim(payload?.boardId) ||
+    trim(payload?.board?.id) ||
+    trim(payload?.board?.boardId) ||
+    trim(payload?.card?.boardId) ||
+    trim(payload?.column?.boardId) ||
+    trim(payload?.task?.boardId) ||
+    trim(payload?.shareLink?.boardId) ||
+    ''
+  );
+};
+
+const isBoardScopedPresence = (meta) => trim(meta?.shareScope) === 'board' && !!trim(meta?.boardId);
+
+const shouldReceiveRealtimeEvent = (meta, event) => {
+  if (!isBoardScopedPresence(meta)) return true;
+  return getEventBoardId(event) === trim(meta.boardId);
+};
+
 const handleListWorkspaces = async (request, env, helpers) => {
   const auth = await helpers.ensureAuthenticatedUser(request, env);
   if (auth.error) return auth.error;
@@ -1678,18 +1703,22 @@ const handleRealtimeRequest = async (request, env, helpers, url) => {
 
   const shareToken = trim(url.searchParams.get('shareToken'));
   let workspaceId = trim(url.searchParams.get('workspaceId'));
+  let boardId = '';
   let viewerId = '';
   let viewerEmail = '';
   let viewerName = '';
   let readOnly = false;
+  let shareScope = 'workspace';
 
   if (shareToken) {
     const shareLink = await getShareLinkByToken(env.DB, shareToken);
     if (!shareLink) return helpers.errorResponse('공유 링크를 찾을 수 없습니다.', { status: 404 });
     workspaceId = shareLink.workspaceId;
+    boardId = shareLink.scope === 'board' ? trim(shareLink.boardId) : '';
     viewerId = `share:${shareLink.tokenHint || 'viewer'}`;
     viewerName = '공유 보기 사용자';
     readOnly = true;
+    shareScope = shareLink.scope === 'board' ? 'board' : 'workspace';
   } else {
     const access = await ensureWorkspaceAccess(request, env, helpers, workspaceId);
     if (access.error) return access.error;
@@ -1706,6 +1735,8 @@ const handleRealtimeRequest = async (request, env, helpers, url) => {
   proxyHeaders.set('x-collab-viewer-email', viewerEmail);
   proxyHeaders.set('x-collab-viewer-name', viewerName);
   proxyHeaders.set('x-collab-read-only', readOnly ? '1' : '0');
+  proxyHeaders.set('x-collab-board-id', boardId);
+  proxyHeaders.set('x-collab-share-scope', shareScope);
 
   const proxyRequest = new Request('https://collab.internal/connect', {
     method: 'GET',
@@ -1716,52 +1747,35 @@ const handleRealtimeRequest = async (request, env, helpers, url) => {
 };
 
 export const handleCollabRequest = async ({ request, env, helpers, url, method, pathname }) => {
-  if (method === 'GET' && pathname === '/api/v2/workspaces') return handleListWorkspaces(request, env, helpers);
-  if (method === 'POST' && pathname === '/api/v2/workspaces') return handleCreateWorkspace(request, env, helpers);
-
-  const workspaceSnapshotMatch = /^\/api\/v2\/workspaces\/([^/]+)\/snapshot$/.exec(pathname);
-  if (method === 'GET' && workspaceSnapshotMatch) {
-    return handleGetWorkspaceSnapshot(request, env, helpers, decodeURIComponent(workspaceSnapshotMatch[1]));
-  }
-
-  if (method === 'POST' && pathname === '/api/v2/boards') return handleCreateBoard(request, env, helpers);
-  if (method === 'POST' && pathname === '/api/v2/board-columns') return handleCreateBoardColumn(request, env, helpers);
-  if (method === 'POST' && pathname === '/api/v2/cards') return handleCreateCard(request, env, helpers);
-  if (method === 'POST' && pathname === '/api/v2/card-tasks') return handleCreateTask(request, env, helpers);
-  if (method === 'POST' && pathname === '/api/v2/time-off') return handleCreateTimeOff(request, env, helpers);
-  if (method === 'POST' && pathname === '/api/v2/share-links') return handleCreateShareLink(request, env, helpers);
-  if (method === 'POST' && pathname === '/api/v2/import/legacy') return handleImportLegacy(request, env, helpers);
-  if (method === 'GET' && pathname === '/api/v2/realtime') return handleRealtimeRequest(request, env, helpers, url);
-
-  const cardMatch = /^\/api\/v2\/cards\/([^/]+)$/.exec(pathname);
-  if (cardMatch) {
-    const cardId = decodeURIComponent(cardMatch[1]);
-    if (method === 'PATCH') return handlePatchCard(request, env, helpers, cardId);
-    if (method === 'DELETE') return handleDeleteCard(request, env, helpers, cardId);
-  }
-
-  const taskMatch = /^\/api\/v2\/card-tasks\/([^/]+)$/.exec(pathname);
-  if (taskMatch) {
-    const taskId = decodeURIComponent(taskMatch[1]);
-    if (method === 'PATCH') return handlePatchTask(request, env, helpers, taskId);
-    if (method === 'DELETE') return handleDeleteTask(request, env, helpers, taskId);
-  }
-
-  const timeOffMatch = /^\/api\/v2\/time-off\/([^/]+)$/.exec(pathname);
-  if (timeOffMatch) {
-    const entryId = decodeURIComponent(timeOffMatch[1]);
-    if (method === 'PATCH') return handlePatchTimeOff(request, env, helpers, entryId);
-    if (method === 'DELETE') return handleDeleteTimeOff(request, env, helpers, entryId);
-  }
-
-  const shareSnapshotMatch = /^\/api\/v2\/share-links\/([^/]+)\/snapshot$/.exec(pathname);
-  if (method === 'GET' && shareSnapshotMatch) {
-    return handleGetShareSnapshot(request, env, helpers, decodeURIComponent(shareSnapshotMatch[1]));
-  }
-
-  return helpers.errorResponse('찾을 수 없습니다.', { status: 404 });
+  return routeCollabRequest({
+    request,
+    env,
+    helpers,
+    url,
+    method,
+    pathname,
+    handlers: {
+      handleListWorkspaces,
+      handleCreateWorkspace,
+      handleGetWorkspaceSnapshot,
+      handleCreateBoard,
+      handleCreateBoardColumn,
+      handleCreateCard,
+      handleCreateTask,
+      handleCreateTimeOff,
+      handleCreateShareLink,
+      handleImportLegacy,
+      handleRealtimeRequest,
+      handlePatchCard,
+      handleDeleteCard,
+      handlePatchTask,
+      handleDeleteTask,
+      handlePatchTimeOff,
+      handleDeleteTimeOff,
+      handleGetShareSnapshot,
+    },
+  });
 };
-
 const getConnectionMeta = (ws) => {
   try {
     return ws.deserializeAttachment() || {};
@@ -1777,16 +1791,18 @@ export class CollabWorkspaceRoom extends DurableObject {
     this.env = env;
   }
 
-  listPresence() {
+  listPresence(forMeta = null) {
+    const boardId = isBoardScopedPresence(forMeta) ? trim(forMeta.boardId) : '';
     const deduped = new Map();
     this.ctx.getWebSockets().forEach((ws) => {
       const meta = getConnectionMeta(ws);
+      if (boardId && (!isBoardScopedPresence(meta) || trim(meta.boardId) !== boardId)) return;
       const key = trim(meta.viewerId) || trim(meta.viewerEmail) || trim(meta.connectionId);
       if (!key) return;
       if (!deduped.has(key)) {
         deduped.set(key, {
           viewerId: trim(meta.viewerId) || null,
-          viewerEmail: normalizeEmail(meta.viewerEmail) || null,
+          viewerEmail: boardId ? null : normalizeEmail(meta.viewerEmail) || null,
           viewerName: trim(meta.viewerName) || trim(meta.viewerEmail) || '참여자',
           readOnly: String(meta.readOnly) === '1',
         });
@@ -1795,9 +1811,11 @@ export class CollabWorkspaceRoom extends DurableObject {
     return Array.from(deduped.values());
   }
 
-  broadcast(payload) {
+  broadcast(payload, shouldSend = null) {
     const text = JSON.stringify(payload);
     this.ctx.getWebSockets().forEach((ws) => {
+      const meta = getConnectionMeta(ws);
+      if (typeof shouldSend === 'function' && !shouldSend(meta)) return;
       try {
         ws.send(text);
       } catch {
@@ -1811,7 +1829,18 @@ export class CollabWorkspaceRoom extends DurableObject {
   }
 
   broadcastPresence() {
-    this.broadcast({ type: 'presence', viewers: this.listPresence() });
+    this.ctx.getWebSockets().forEach((ws) => {
+      const meta = getConnectionMeta(ws);
+      try {
+        ws.send(JSON.stringify({ type: 'presence', viewers: this.listPresence(meta) }));
+      } catch {
+        try {
+          ws.close(1011, 'send failed');
+        } catch {
+          // ignore
+        }
+      }
+    });
   }
 
   async fetch(request) {
@@ -1824,7 +1853,8 @@ export class CollabWorkspaceRoom extends DurableObject {
           headers: { 'content-type': 'application/json; charset=utf-8' },
         });
       }
-      this.broadcast({ type: 'event', event: payload.event || null });
+      const event = payload.event || null;
+      this.broadcast({ type: 'event', event }, (meta) => shouldReceiveRealtimeEvent(meta, event));
       return new Response(JSON.stringify({ ok: true }), {
         headers: { 'content-type': 'application/json; charset=utf-8' },
       });
@@ -1841,10 +1871,12 @@ export class CollabWorkspaceRoom extends DurableObject {
       const meta = {
         connectionId: createId(),
         workspaceId: trim(request.headers.get('x-collab-workspace-id')),
+        boardId: trim(request.headers.get('x-collab-board-id')),
         viewerId: trim(request.headers.get('x-collab-viewer-id')),
         viewerEmail: normalizeEmail(request.headers.get('x-collab-viewer-email')),
         viewerName: trim(request.headers.get('x-collab-viewer-name')),
         readOnly: trim(request.headers.get('x-collab-read-only')) === '1' ? '1' : '0',
+        shareScope: trim(request.headers.get('x-collab-share-scope')) || 'workspace',
       };
       server.serializeAttachment(meta);
       this.ctx.acceptWebSocket(server);
@@ -1854,7 +1886,7 @@ export class CollabWorkspaceRoom extends DurableObject {
           connectionId: meta.connectionId,
           workspaceId: meta.workspaceId,
           readOnly: meta.readOnly === '1',
-          viewers: this.listPresence(),
+          viewers: this.listPresence(meta),
         }),
       );
       this.broadcastPresence();
@@ -1876,7 +1908,7 @@ export class CollabWorkspaceRoom extends DurableObject {
       return;
     }
     if (payload?.type === 'presence:sync') {
-      ws.send(JSON.stringify({ type: 'presence', viewers: this.listPresence() }));
+      ws.send(JSON.stringify({ type: 'presence', viewers: this.listPresence(getConnectionMeta(ws)) }));
     }
   }
 

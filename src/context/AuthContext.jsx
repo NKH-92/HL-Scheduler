@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getAuthMe,
   loginAuthUser,
@@ -48,16 +48,29 @@ export function AuthProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true);
   const [authUser, setAuthUser] = useState(null);
   const [permissions, setPermissions] = useState(EMPTY_PERMISSIONS);
+  const sessionRequestIdRef = useRef(0);
+  const authUserRef = useRef(null);
+  const permissionsRef = useRef(EMPTY_PERMISSIONS);
+
+  const applyAuthState = useCallback((nextUser, nextPermissions) => {
+    authUserRef.current = nextUser;
+    permissionsRef.current = nextPermissions;
+    setAuthUser(nextUser);
+    setPermissions(nextPermissions);
+  }, []);
 
   const clearAuthState = useCallback(() => {
     setPublicSchedulesAuthToken('');
-    setAuthUser(null);
-    setPermissions(EMPTY_PERMISSIONS);
-  }, []);
+    applyAuthState(null, EMPTY_PERMISSIONS);
+  }, [applyAuthState]);
 
   const refreshSession = useCallback(async () => {
+    const requestId = ++sessionRequestIdRef.current;
     try {
       const data = await getAuthMe();
+      if (requestId !== sessionRequestIdRef.current) {
+        return { authenticated: !!authUserRef.current, user: authUserRef.current };
+      }
       if (!data?.authenticated) {
         clearAuthState();
         return { authenticated: false, user: null };
@@ -70,14 +83,22 @@ export function AuthProvider({ children }) {
         return { authenticated: false, user: null };
       }
 
-      setAuthUser(user);
-      setPermissions(nextPermissions);
+      applyAuthState(user, nextPermissions);
       return { authenticated: true, user };
-    } catch {
-      clearAuthState();
-      return { authenticated: false, user: null };
+    } catch (error) {
+      if (requestId !== sessionRequestIdRef.current) {
+        return { authenticated: !!authUserRef.current, user: authUserRef.current };
+      }
+
+      const status = Number(error?.status);
+      if (status === 401 || status === 403) {
+        clearAuthState();
+        return { authenticated: false, user: null };
+      }
+
+      return { authenticated: !!authUserRef.current, user: authUserRef.current };
     }
-  }, [clearAuthState]);
+  }, [applyAuthState, clearAuthState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +115,15 @@ export function AuthProvider({ children }) {
 
   const signIn = useCallback(
     async ({ email, password }) => {
+      const requestId = ++sessionRequestIdRef.current;
       const data = await loginAuthUser({ email, password });
+      if (requestId !== sessionRequestIdRef.current) {
+        return {
+          user: authUserRef.current,
+          permissions: permissionsRef.current,
+          expiresAt: Number(data?.expiresAt) || null,
+        };
+      }
       const token = String(data?.token || '').trim();
       if (token) setPublicSchedulesAuthToken(token);
 
@@ -102,11 +131,10 @@ export function AuthProvider({ children }) {
       const nextPermissions = normalizePermissions(data.permissions);
       if (!user) throw new Error('로그인 사용자 정보가 올바르지 않습니다.');
 
-      setAuthUser(user);
-      setPermissions(nextPermissions);
+      applyAuthState(user, nextPermissions);
       return { user, permissions: nextPermissions, expiresAt: Number(data?.expiresAt) || null };
     },
-    [],
+    [applyAuthState],
   );
 
   const signUp = useCallback(async ({ email, password }) => {
@@ -115,17 +143,20 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    const requestId = ++sessionRequestIdRef.current;
     try {
       await logoutAuthSession();
     } catch {
       // ignore logout request failures and clear local session anyway
     } finally {
-      clearAuthState();
+      if (requestId === sessionRequestIdRef.current) {
+        clearAuthState();
+      }
     }
   }, [clearAuthState]);
 
   const value = useMemo(() => {
-    const isAuthenticated = !!authUser && permissions.isApproved;
+    const isAuthenticated = !!authUser;
     return {
       isLoading,
       authUser,

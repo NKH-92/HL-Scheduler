@@ -150,11 +150,20 @@ export default function WorkspaceView({ workspaceId = '', shareToken = '', readO
     void loadSnapshot();
   }, [loadSnapshot]);
 
-  const boards = Array.isArray(snapshot?.boards) ? snapshot.boards : [];
-  const columns = Array.isArray(snapshot?.columns) ? snapshot.columns : [];
-  const cards = Array.isArray(snapshot?.cards) ? snapshot.cards : [];
-  const cardTasks = Array.isArray(snapshot?.cardTasks) ? snapshot.cardTasks : [];
-  const timeOffEntries = Array.isArray(snapshot?.timeOffEntries) ? snapshot.timeOffEntries : [];
+  const snapshotBoards = snapshot?.boards;
+  const snapshotColumns = snapshot?.columns;
+  const snapshotCards = snapshot?.cards;
+  const snapshotCardTasks = snapshot?.cardTasks;
+  const snapshotTimeOffEntries = snapshot?.timeOffEntries;
+
+  const boards = useMemo(() => (Array.isArray(snapshotBoards) ? snapshotBoards : []), [snapshotBoards]);
+  const columns = useMemo(() => (Array.isArray(snapshotColumns) ? snapshotColumns : []), [snapshotColumns]);
+  const cards = useMemo(() => (Array.isArray(snapshotCards) ? snapshotCards : []), [snapshotCards]);
+  const cardTasks = useMemo(() => (Array.isArray(snapshotCardTasks) ? snapshotCardTasks : []), [snapshotCardTasks]);
+  const timeOffEntries = useMemo(
+    () => (Array.isArray(snapshotTimeOffEntries) ? snapshotTimeOffEntries : []),
+    [snapshotTimeOffEntries],
+  );
 
   useEffect(() => {
     if (!boards.length) return;

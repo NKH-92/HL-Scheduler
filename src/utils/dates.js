@@ -24,6 +24,14 @@ export const parseYmd = (value) => {
   return date;
 };
 
+const parseDatePrefix = (value) => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  const match = /^(\d{4}-\d{1,2}-\d{1,2})(?:[T\s].+)$/.exec(trimmed);
+  if (!match) return null;
+  return parseYmd(match[1]);
+};
+
 export const toDate = (value) => {
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) return null;
@@ -33,6 +41,8 @@ export const toDate = (value) => {
   if (typeof value === 'string') {
     const parsedYmd = parseYmd(value);
     if (parsedYmd) return parsedYmd;
+    const parsedPrefix = parseDatePrefix(value);
+    if (parsedPrefix) return parsedPrefix;
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? null : date;
   }

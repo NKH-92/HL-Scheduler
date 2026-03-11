@@ -28,6 +28,7 @@ const sanitizeCards = (cards) =>
   (Array.isArray(cards) ? cards : []).map((card) => ({
     ...card,
     leadUserId: null,
+    leadEmail: '',
     createdByUserId: null,
   }));
 
@@ -35,6 +36,7 @@ const sanitizeCardTasks = (cardTasks) =>
   (Array.isArray(cardTasks) ? cardTasks : []).map((task) => ({
     ...task,
     assigneeUserId: null,
+    assigneeEmail: '',
     createdByUserId: null,
   }));
 
