@@ -43,9 +43,9 @@ import { isPlainObject, clampZoom, buildFolderSelectOptions as buildFolderSelect
 const ALL_FOLDERS_ID = '__all_folders__';
 const PAGE_SIZE = 40;
 const VIEW_MODE_LABELS = {
-  Day: '�� (Day)',
-  Week: '�� (Week)',
-  Month: '�� (Month)',
+  Day: '일 (Day)',
+  Week: '주 (Week)',
+  Month: '월 (Month)',
 };
 const KANBAN_STATUS_TONES = {
   planning: {
@@ -106,7 +106,7 @@ const buildEmployeeDisplay = (email, directory) => {
 const normalizeSchedulePayload = (payload, fallbackName) => {
   if (Array.isArray(payload)) {
     return {
-      name: String(fallbackName || '���� ����').trim() || '���� ����',
+      name: String(fallbackName || '이름 없는 일정').trim() || '이름 없는 일정',
       status: normalizePublicScheduleStatus(null),
       holdingReason: '',
       nextAction: '',
@@ -121,11 +121,11 @@ const normalizeSchedulePayload = (payload, fallbackName) => {
   }
 
   if (!isPlainObject(payload)) {
-    throw new Error('���� ������ ������ �ùٸ��� �ʽ��ϴ�.');
+    throw new Error('일정 데이터 형식이 올바르지 않습니다.');
   }
 
   return {
-    name: String(payload.name || fallbackName || '���� ����').trim() || '���� ����',
+    name: String(payload.name || fallbackName || '이름 없는 일정').trim() || '이름 없는 일정',
     status: normalizePublicScheduleStatus(payload.status),
     holdingReason: String(payload.holdingReason || '').trim(),
     nextAction: String(payload.nextAction || '').trim(),
@@ -249,10 +249,10 @@ function PublicSchedules({
   }, [folderSelectOptions]);
 
   const selectedFolderDisplayName = useMemo(() => {
-    if (!supportsFolders || selectedFolderId === ALL_FOLDERS_ID) return '��ü';
-    if (selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID) return '�̺з�';
+    if (!supportsFolders || selectedFolderId === ALL_FOLDERS_ID) return '전체';
+    if (selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID) return '미분류';
     const selected = folders.find((folder) => folder.id === selectedFolderId);
-    return selected?.path || selected?.name || '��ü';
+    return selected?.path || selected?.name || '전체';
   }, [supportsFolders, selectedFolderId, folders]);
 
   const folderMoveStateById = useMemo(() => {
@@ -288,9 +288,9 @@ function PublicSchedules({
       if (Number(error?.status) === 404) {
         setSupportsFolders(false);
         setFolders([]);
-        setFoldersError('���� ���� ������ ���� Ʈ���� �������� �ʽ��ϴ�.');
+        setFoldersError('현재 서버에서는 폴더 트리를 지원하지 않습니다.');
       } else {
-        setFoldersError(error?.message || '���� ����� �ҷ����� ���߽��ϴ�.');
+        setFoldersError(error?.message || '폴더 목록을 불러오지 못했습니다.');
       }
     } finally {
       setIsLoadingFolders(false);
@@ -365,7 +365,7 @@ function PublicSchedules({
         setHasMore(safeList.length === PAGE_SIZE);
       } catch (error) {
         if (listRequestIdRef.current !== requestId) return;
-        setListError(error?.message || '���� ���� ����� �ҷ����� ���߽��ϴ�.');
+        setListError(error?.message || '공개 일정 목록을 불러오지 못했습니다.');
         if (!append) {
           setItems([]);
           setHasMore(false);
@@ -436,7 +436,7 @@ function PublicSchedules({
       setPreviewFitSettings(normalized.fitSettings);
     } catch (error) {
       if (scheduleRequestIdRef.current !== requestId) return;
-      setScheduleError(error?.message || '������ �ҷ����� ���߽��ϴ�.');
+      setScheduleError(error?.message || '일정을 불러오지 못했습니다.');
       setSelectedSchedule(null);
     } finally {
       if (scheduleRequestIdRef.current !== requestId) return;
@@ -472,7 +472,7 @@ function PublicSchedules({
     const folderPath =
       String(meta.folderPath ?? meta.folder_path ?? '').trim() ||
       String(folderPathById.get(folderId || PUBLIC_UNCATEGORIZED_FOLDER_ID) || '').trim() ||
-      (folderId ? folderId : '�̺з�');
+      (folderId ? folderId : '미분류');
     const createdAt = formatDateTime(meta.createdAt ?? meta.created_at);
     const updatedAt = formatDateTime(meta.updatedAt ?? meta.updated_at);
     const statusLabel = getPublicScheduleStatusLabel(meta.status ?? selectedSchedule?.status);
@@ -480,12 +480,12 @@ function PublicSchedules({
     const updatedByInfo = buildEmployeeDisplay(meta.updatedByEmail || meta.updated_by_email || '', employeeDirectory);
 
     return [
-      { label: '����', value: folderPath || '�̺з�' },
-      { label: '����', value: statusLabel },
-      { label: '���', value: createdAt || '-' },
-      { label: '����', value: updatedAt || '-' },
-      { label: '�Խ���', value: createdByInfo.profile || createdByInfo.email || '-' },
-      { label: '���� ������', value: updatedByInfo.profile || updatedByInfo.email || '-' },
+      { label: '폴더', value: folderPath || '미분류' },
+      { label: '상태', value: statusLabel },
+      { label: '생성', value: createdAt || '-' },
+      { label: '수정', value: updatedAt || '-' },
+      { label: '생성자', value: createdByInfo.profile || createdByInfo.email || '-' },
+      { label: '최종 수정자', value: updatedByInfo.profile || updatedByInfo.email || '-' },
     ];
   }, [selectedMeta, selectedSchedule, folderPathById, employeeDirectory]);
 
@@ -515,12 +515,12 @@ function PublicSchedules({
 
   const createFolder = async () => {
     if (!canManageFolders) {
-      setFolderManageError('���� ������ ������ ��忡���� ����� �� �ֽ��ϴ�.');
+      setFolderManageError('폴더 관리는 관리자 권한 계정으로만 사용할 수 있습니다.');
       return;
     }
     const safeName = String(newFolderName || '').trim();
     if (!safeName) {
-      setFolderManageError('�� ���� �̸��� �Է����ּ���.');
+      setFolderManageError('새 폴더 이름을 입력해 주세요.');
       return;
     }
     setIsCreatingFolder(true);
@@ -531,7 +531,7 @@ function PublicSchedules({
       await loadFolders();
       setListReloadToken((v) => v + 1);
     } catch (error) {
-      setFolderManageError(error?.message || '������ �������� ���߽��ϴ�.');
+      setFolderManageError(error?.message || '폴더를 생성하지 못했습니다.');
     } finally {
       setIsCreatingFolder(false);
     }
@@ -539,21 +539,21 @@ function PublicSchedules({
 
   const deleteSelectedFolder = async () => {
     if (!canManageFolders) {
-      setFolderManageError('���� ������ ������ ��忡���� ����� �� �ֽ��ϴ�.');
+      setFolderManageError('폴더 관리는 관리자 권한 계정으로만 사용할 수 있습니다.');
       return;
     }
     if (selectedFolderId === ALL_FOLDERS_ID || selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID) {
-      setFolderManageError('��ü/�̺з� ������ ������ �� �����ϴ�.');
+      setFolderManageError('전체/미분류 폴더는 삭제할 수 없습니다.');
       return;
     }
     const selectedFolder = folders.find((folder) => folder.id === selectedFolderId);
     if (!selectedFolder) {
-      setFolderManageError('������ ������ ã�� �� �����ϴ�.');
+      setFolderManageError('삭제할 폴더를 찾을 수 없습니다.');
       return;
     }
     const doConfirm = typeof onConfirm === 'function'
-      ? () => onConfirm(`���� '${selectedFolder.path || selectedFolder.name}'�� �����ұ��?`, { title: '���� Ȯ��', confirmText: '����', cancelText: '���' })
-      : () => Promise.resolve(window.confirm(`���� '${selectedFolder.path || selectedFolder.name}'�� �����ұ��?`));
+      ? () => onConfirm(`폴더 '${selectedFolder.path || selectedFolder.name}'을 삭제할까요?`, { title: '삭제 확인', confirmText: '삭제', cancelText: '취소' })
+      : () => Promise.resolve(window.confirm(`폴더 '${selectedFolder.path || selectedFolder.name}'을 삭제할까요?`));
     const confirmed = await doConfirm();
     if (!confirmed) return;
 
@@ -565,7 +565,7 @@ function PublicSchedules({
       await loadFolders();
       setListReloadToken((v) => v + 1);
     } catch (error) {
-      setFolderManageError(error?.message || '������ �������� ���߽��ϴ�.');
+      setFolderManageError(error?.message || '폴더를 삭제하지 못했습니다.');
     } finally {
       setIsDeletingFolder(false);
     }
@@ -573,7 +573,7 @@ function PublicSchedules({
 
   const moveFolderOrder = async (folder, direction) => {
     if (!canManageFolders) {
-      setFolderManageError('���� ���� ������ ������ ��忡���� ����� �� �ֽ��ϴ�.');
+      setFolderManageError('폴더 순서 변경은 관리자 권한 계정으로만 사용할 수 있습니다.');
       return;
     }
 
@@ -583,7 +583,7 @@ function PublicSchedules({
     const safeDirection = String(direction || '').trim().toLowerCase();
     const moveState = folderMoveStateById.get(folderId);
     if (!moveState) {
-      setFolderManageError('������ ������ ã�� �� �����ϴ�.');
+      setFolderManageError('이동할 폴더를 찾을 수 없습니다.');
       return;
     }
     if ((safeDirection === 'up' && !moveState.canMoveUp) || (safeDirection === 'down' && !moveState.canMoveDown)) {
@@ -596,7 +596,7 @@ function PublicSchedules({
       await reorderPublicFolder(folderId, safeDirection);
       await loadFolders();
     } catch (error) {
-      setFolderManageError(error?.message || '���� ������ �������� ���߽��ϴ�.');
+      setFolderManageError(error?.message || '폴더 순서를 변경하지 못했습니다.');
     } finally {
       setMovingFolderId('');
     }
@@ -663,9 +663,9 @@ function PublicSchedules({
   }, [normalizeScheduleRecord]);
 
   const updateScheduleMeta = useCallback(
-    async (item, patch, { errorMessage = '������Ʈ ������ �������� ���߽��ϴ�.', stateKey = 'meta' } = {}) => {
+    async (item, patch, { errorMessage = '프로젝트 정보를 수정하지 못했습니다.', stateKey = 'meta' } = {}) => {
       if (!canManageFolders) {
-        setListError('������Ʈ ��Ÿ ���� ������ ������ ��忡���� ����� �� �ֽ��ϴ�.');
+        setListError('프로젝트 메타 정보 수정은 관리자 권한 계정으로만 사용할 수 있습니다.');
         return null;
       }
 
@@ -715,7 +715,7 @@ function PublicSchedules({
 
   const changeScheduleFolder = async (item, nextFolderIdRaw) => {
     if (!canManageFolders) {
-      setListError('���� �̵��� ������ ��忡���� ����� �� �ֽ��ϴ�.');
+      setListError('폴더 이동은 관리자 권한 계정으로만 사용할 수 있습니다.');
       return;
     }
 
@@ -746,7 +746,7 @@ function PublicSchedules({
       });
       setListReloadToken((v) => v + 1);
     } catch (error) {
-      setListError(error?.message || '������Ʈ ������ �������� ���߽��ϴ�.');
+      setListError(error?.message || '프로젝트 폴더를 변경하지 못했습니다.');
     } finally {
       setMovingFolderBySchedule((prev) => {
         const next = { ...prev };
@@ -758,7 +758,7 @@ function PublicSchedules({
 
   const changeScheduleStatus = async (item, nextStatusRaw) => {
     if (!canManageFolders) {
-      setListError('ĭ�� ���� ������ ������ ��忡���� ����� �� �ֽ��ϴ�.');
+      setListError('칸반 상태 변경은 관리자 권한 계정으로만 사용할 수 있습니다.');
       return;
     }
 
@@ -769,22 +769,22 @@ function PublicSchedules({
     const nextStatus = normalizePublicScheduleStatus(nextStatusRaw);
     if (currentStatus === nextStatus) return;
 
-    await updateScheduleMeta(item, { status: nextStatus }, { errorMessage: '������Ʈ ���¸� �������� ���߽��ϴ�.', stateKey: 'status' });
+    await updateScheduleMeta(item, { status: nextStatus }, { errorMessage: '프로젝트 상태를 변경하지 못했습니다.', stateKey: 'status' });
   };
 
   const deleteSchedule = async (item) => {
     if (!canManageFolders) {
-      setListError('���� ������ ������ ��忡���� ����� �� �ֽ��ϴ�.');
+      setListError('일정 삭제는 관리자 권한 계정으로만 사용할 수 있습니다.');
       return;
     }
 
     const scheduleId = String(item?.id || selectedId || '').trim();
     if (!scheduleId) return;
 
-    const scheduleName = String(item?.name || item?.title || selectedSchedule?.name || selectedMeta?.name || '').trim() || '���� ����';
+    const scheduleName = String(item?.name || item?.title || selectedSchedule?.name || selectedMeta?.name || '').trim() || '이름 없는 일정';
     const doConfirm = typeof onConfirm === 'function'
-      ? () => onConfirm(`���� '${scheduleName}'�� �����ұ��?`, { title: '���� Ȯ��', confirmText: '����', cancelText: '���' })
-      : () => Promise.resolve(window.confirm(`���� '${scheduleName}'�� �����ұ��?`));
+      ? () => onConfirm(`일정 '${scheduleName}'을 삭제할까요?`, { title: '삭제 확인', confirmText: '삭제', cancelText: '취소' })
+      : () => Promise.resolve(window.confirm(`일정 '${scheduleName}'을 삭제할까요?`));
     const confirmed = await doConfirm();
     if (!confirmed) return;
 
@@ -805,7 +805,7 @@ function PublicSchedules({
       await loadFolders();
       setListReloadToken((v) => v + 1);
     } catch (error) {
-      const message = error?.message || '������ �������� ���߽��ϴ�.';
+      const message = error?.message || '일정을 삭제하지 못했습니다.';
       setListError(message);
       if (selectedId === scheduleId) setScheduleError(message);
     } finally {
@@ -865,7 +865,7 @@ function PublicSchedules({
   const zoomValue = clampZoom(previewZoomSettings?.[previewViewMode] ?? 100);
   const rangePadding = previewRangePadding?.[previewViewMode] || { before: 0, after: 0 };
   const fitEnabled = (previewFitSettings?.[previewViewMode] || {}).enabled || false;
-  const rangeUnit = previewViewMode === 'Day' ? '��' : previewViewMode === 'Week' ? '��' : '����';
+  const rangeUnit = previewViewMode === 'Day' ? '일' : previewViewMode === 'Week' ? '주' : '월';
   const selectedFolderForAdmin = useMemo(
     () => folders.find((folder) => folder.id === selectedFolderId) || null,
     [folders, selectedFolderId],
@@ -883,8 +883,8 @@ function PublicSchedules({
       ...base,
       {
         id: PUBLIC_UNCATEGORIZED_FOLDER_ID,
-        name: '�̺з�',
-        path: '�̺з�',
+        name: '미분류',
+        path: '미분류',
         depth: 1,
         projectCount: 0,
       },
@@ -894,8 +894,8 @@ function PublicSchedules({
     if (!supportsFolders) {
       return {
         id: ALL_FOLDERS_ID,
-        name: '���� ����',
-        path: '��ü ����',
+        name: '전체 일정',
+        path: '전체 일정',
         depth: 1,
         projectCount: items.length,
       };
@@ -903,8 +903,8 @@ function PublicSchedules({
     if (selectedFolderId === PUBLIC_UNCATEGORIZED_FOLDER_ID) {
       return {
         id: PUBLIC_UNCATEGORIZED_FOLDER_ID,
-        name: '�̺з�',
-        path: '�̺з�',
+        name: '미분류',
+        path: '미분류',
         depth: 1,
         projectCount: items.length,
       };
@@ -1020,7 +1020,7 @@ function PublicSchedules({
       ).trim();
       const currentValue = String(item?.holdingReason ?? '').trim();
       if (nextValue === currentValue) return;
-      await updateScheduleMeta(item, { holdingReason: nextValue }, { errorMessage: 'Holding ������ �������� ���߽��ϴ�.' });
+      await updateScheduleMeta(item, { holdingReason: nextValue }, { errorMessage: 'Holding 사유를 저장하지 못했습니다.' });
     },
     [holdingReasonDrafts, updateScheduleMeta],
   );
@@ -1036,7 +1036,7 @@ function PublicSchedules({
       ).trim();
       const currentValue = String(item?.nextAction ?? '').trim();
       if (nextValue === currentValue) return;
-      await updateScheduleMeta(item, { nextAction: nextValue }, { errorMessage: '���� �׼��� �������� ���߽��ϴ�.' });
+      await updateScheduleMeta(item, { nextAction: nextValue }, { errorMessage: '다음 액션을 저장하지 못했습니다.' });
     },
     [nextActionDrafts, updateScheduleMeta],
   );
@@ -1049,9 +1049,9 @@ function PublicSchedules({
             <Users size={20} />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-slate-800">���� ���� ����� ��Ȱ��ȭ�Ǿ� �ֽ��ϴ�.</h2>
+            <h2 className="text-lg font-bold text-slate-800">공개 일정 기능이 비활성화되어 있습니다.</h2>
             <p className="mt-1 text-sm text-slate-500">
-              <code>VITE_PUBLIC_SCHEDULES_API_BASE</code> ȯ�� ������ ������ �� �ٽ� �������ּ���.
+              <code>VITE_PUBLIC_SCHEDULES_API_BASE</code> 환경 변수를 설정한 뒤 다시 빌드해 주세요.
             </p>
           </div>
         </div>
@@ -1103,7 +1103,7 @@ function PublicSchedules({
             {listError && <div className="mx-5 mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{listError}</div>}
             {!canImport && (
               <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-                �α��� ������ ���� ��ȸ�� �����մϴ�. ����/��������� �α��� �� ����� �� �ֽ��ϴ�.
+                로그인한 계정만 일정 가져오기를 사용할 수 있습니다. 업로드/폴더 관리는 로그인 후 사용할 수 있습니다.
               </div>
             )}
 
@@ -1145,7 +1145,7 @@ function PublicSchedules({
                   disabled={isLoadingMore || isLoadingList}
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isLoadingMore ? '�ҷ����� ��...' : '�� ����'}
+                  {isLoadingMore ? '불러오는 중...' : '더 보기'}
                 </button>
               </div>
             )}
@@ -1155,12 +1155,12 @@ function PublicSchedules({
         <section className="glass-panel flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex flex-col gap-3 border-b border-slate-200/70 px-5 py-4">
             <button type="button" onClick={() => setContentView('list')} className="inline-flex w-fit items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50">
-              {'<'} �����
+              {'<'} 목록으로
             </button>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <h2 className="truncate text-lg font-bold tracking-tight text-slate-900">{selectedBoardState?.name || selectedSchedule?.name || '�̸�����'}</h2>
-                <p className="mt-1 text-xs text-slate-500">{selectedSchedule ? `�۾� ${selectedSchedule.tasks.length}��` : '��Ͽ��� ������ �����ϼ���.'}</p>
+                <h2 className="truncate text-lg font-bold tracking-tight text-slate-900">{selectedBoardState?.name || selectedSchedule?.name || '이름 없음'}</h2>
+                <p className="mt-1 text-xs text-slate-500">{selectedSchedule ? `작업 ${selectedSchedule.tasks.length}개` : '목록에서 프로젝트를 선택하세요.'}</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {canManageFolders && (
@@ -1170,7 +1170,7 @@ function PublicSchedules({
                     disabled={!selectedSchedule || deletingScheduleId === selectedId}
                     className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <Trash2 size={18} /> {deletingScheduleId === selectedId ? '���� ��...' : '����'}
+                    <Trash2 size={18} /> {deletingScheduleId === selectedId ? '삭제 중...' : '삭제'}
                   </button>
                 )}
                 <button
@@ -1178,17 +1178,17 @@ function PublicSchedules({
                   onClick={importSelectedSchedule}
                   disabled={!selectedSchedule || !canImport}
                   className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  title={!canImport ? '��������� �α��� �� ����� �� �ֽ��ϴ�.' : undefined}
+                  title={!canImport ? '일정 가져오기는 로그인 후 사용할 수 있습니다.' : undefined}
                 >
-                  <Download size={18} /> {canImport ? '��������' : '�������� (�α��� �ʿ�)'}
+                  <Download size={18} /> {canImport ? '가져오기' : '가져오기 (로그인 필요)'}
                 </button>
               </div>
             </div>
           </div>
 
           {scheduleError && <div className="mx-5 mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{scheduleError}</div>}
-          {!selectedSchedule && !isLoadingSchedule && !scheduleError && <div className="flex-1 px-5 py-8 text-sm text-slate-500">������Ʈ ī�带 �����ϸ� �̸����Ⱑ ǥ�õ˴ϴ�.</div>}
-          {isLoadingSchedule && <div className="flex-1 px-5 py-8 text-sm text-slate-400">������ �ҷ����� ��...</div>}
+          {!selectedSchedule && !isLoadingSchedule && !scheduleError && <div className="flex-1 px-5 py-8 text-sm text-slate-500">프로젝트 카드를 선택하면 미리보기가 표시됩니다.</div>}
+          {isLoadingSchedule && <div className="flex-1 px-5 py-8 text-sm text-slate-400">프로젝트를 불러오는 중...</div>}
 
           {selectedSchedule && (
             <>

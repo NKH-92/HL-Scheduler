@@ -150,6 +150,34 @@ function GanttChart({
     return next;
   };
 
+  const config = {
+    Day: { colWidth: 60 },
+    Week: { colWidth: 24 },
+    Month: { colWidth: 8 },
+  };
+
+  const rawZoom = Number(zoom);
+  const zoomFactor = Number.isFinite(rawZoom) ? rawZoom : 1;
+  const clampedZoom = Math.max(0.25, Math.min(4, zoomFactor));
+
+  const baseColWidth = config[viewMode].colWidth;
+  const maxColWidth = baseColWidth * clampedZoom;
+  let colWidth = maxColWidth;
+  const fitViewportWidth = isExportMode ? Number(exportViewportWidth) : viewportRect.width;
+  if (fitEnabled && Number.isFinite(fitViewportWidth) && fitViewportWidth > 0) {
+    const fitColWidth = fitViewportWidth / Math.max(1, totalDays);
+    colWidth = Math.min(maxColWidth, fitColWidth);
+  }
+
+  const leftPaneWidthPx = (() => {
+    const override = Number(exportLeftPaneWidth);
+    if (Number.isFinite(override) && override > 0) return override;
+    if (isExportMode) return GANTT_EXPORT_LEFT_PANE_PX;
+    return isCompactMode ? GANTT_LEFT_PANE_COMPACT_PX : GANTT_LEFT_PANE_PX;
+  })();
+
+  const chartWidth = totalDays * colWidth;
+
   const startDrag = (event, task, mode) => {
     if (!isInteractive) return;
     if (event.button != null && event.button !== 0) return;
@@ -383,34 +411,6 @@ function GanttChart({
     leftPane.addEventListener('wheel', handleWheel, { passive: false });
     return () => leftPane.removeEventListener('wheel', handleWheel);
   }, [isExportMode, fitEnabled]);
-
-  const config = {
-    Day: { colWidth: 60 },
-    Week: { colWidth: 24 },
-    Month: { colWidth: 8 },
-  };
-
-  const rawZoom = Number(zoom);
-  const zoomFactor = Number.isFinite(rawZoom) ? rawZoom : 1;
-  const clampedZoom = Math.max(0.25, Math.min(4, zoomFactor));
-
-  const baseColWidth = config[viewMode].colWidth;
-  const maxColWidth = baseColWidth * clampedZoom;
-  let colWidth = maxColWidth;
-  const fitViewportWidth = isExportMode ? Number(exportViewportWidth) : viewportRect.width;
-  if (fitEnabled && Number.isFinite(fitViewportWidth) && fitViewportWidth > 0) {
-    const fitColWidth = fitViewportWidth / Math.max(1, totalDays);
-    colWidth = Math.min(maxColWidth, fitColWidth);
-  }
-
-  const leftPaneWidthPx = (() => {
-    const override = Number(exportLeftPaneWidth);
-    if (Number.isFinite(override) && override > 0) return override;
-    if (isExportMode) return GANTT_EXPORT_LEFT_PANE_PX;
-    return isCompactMode ? GANTT_LEFT_PANE_COMPACT_PX : GANTT_LEFT_PANE_PX;
-  })();
-
-  const chartWidth = totalDays * colWidth;
 
   const rowCount = tasks.length;
   const enableRowVirtualization = !isExportMode && rowCount > ROW_VIRTUALIZATION_THRESHOLD;

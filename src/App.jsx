@@ -301,11 +301,11 @@ function App() {
           const loginResult = await signIn({ email, password });
           setIsAuthModalOpen(false);
           routeByUserRole(loginResult?.user || null);
-          await alertAsync('가?�이 ?�인?�어 바로 로그?�되?�습?�다.');
+          await alertAsync('가입이 승인되어 바로 로그인되었습니다.');
           return;
         }
         setIsAuthModalOpen(false);
-        await alertAsync('가???�청???�수?�었?�니?? 관리자 ?�인 ??로그?�할 ???�습?�다.');
+        await alertAsync('가입 신청이 접수되었으니 관리자 승인 후 로그인할 수 있습니다.');
       } finally {
         setIsAuthSubmitting(false);
       }
@@ -412,7 +412,7 @@ function App() {
             className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
             role="alert"
           >
-            브라?��? ?�?�소�??�용?????�어 ?�로고침 ??변경사??�� ?�라�????�습?�다.
+            브라우저 저장소를 사용할 수 없어 새로고침 전에 변경사항이 사라질 수 있습니다.
           </div>
         )}
         {dependencyCycleIds.length > 0 && (
@@ -420,12 +420,12 @@ function App() {
             className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
             role="alert"
           >
-            ?�존???�환??감�??�었?�니?? ?�환???�함???�업?� ?�동 ?�정 밀�??�?�에???�외?�니??
+            의존성 순환이 감지되었으니, 순환에 포함된 작업은 자동 일정 밀림 계산에서 제외됩니다.
           </div>
         )}
         {isAuthLoading && (
           <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800" role="status">
-            로그???�태�??�인?�는 중입?�다...
+            로그인 상태를 확인하는 중입니다...
           </div>
         )}
         {canManageUsers && activeMainTab === 'edit' && <AdminUserManagement />}
