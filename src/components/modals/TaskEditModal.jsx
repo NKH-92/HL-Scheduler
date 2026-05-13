@@ -1,4 +1,4 @@
-﻿import { useMemo } from 'react';
+import { useMemo } from 'react';
 import Modal from '../Modal';
 import { XIcon } from '../Icons';
 import { toUtcMidnightMs } from '../../utils/dates';
@@ -145,21 +145,23 @@ function TaskEditModal({
             onChange={(e) => setFormData({ ...formData, taskName: e.target.value })}
           />
         </div>
-        <div className="space-y-1">
-          <label className="text-xs font-bold text-slate-500 uppercase">사원 선택</label>
-          <select
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-            value={selectedEmployeeId}
-            onChange={(e) => applySelectedEmployee(e.target.value)}
-          >
-            <option value="">직접 입력</option>
-            {employeeOptions.map((employee) => (
-              <option key={employee.id} value={employee.id}>
-                {employee.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        {employeeOptions.length > 0 && (
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-500 uppercase">사원 선택</label>
+            <select
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+              value={selectedEmployeeId}
+              onChange={(e) => applySelectedEmployee(e.target.value)}
+            >
+              <option value="">직접 입력</option>
+              {employeeOptions.map((employee) => (
+                <option key={employee.id} value={employee.id}>
+                  {employee.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="space-y-1">
           <label className="text-xs font-bold text-slate-500 uppercase">부서</label>
           <input
@@ -182,13 +184,13 @@ function TaskEditModal({
           <label className="text-xs font-bold text-slate-500 uppercase">직위</label>
           <input
             type="text"
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+            className="w-full bg-slate-50 border border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
             value={formData.assigneePosition || ''}
             onChange={(e) => setFormData({ ...formData, assigneePosition: e.target.value, assigneeEmail: '' })}
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-bold text-slate-500 uppercase">담당자 이메일</label>
+          <label className="text-xs font-bold text-slate-500 uppercase">분솬이메일</label>
           <input
             type="email"
             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
